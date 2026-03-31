@@ -434,30 +434,27 @@ def apply_texture_to_face(face, texture_key, scale_mm, depth_mm, is_cut=False):
     sketch.isComputeDeferred = False
 
     # ── Step 3: collect closed profiles ─────────────────────────────────────
-    profiles_vec = adsk.core.BaseVector()
+    profiles_oc = adsk.core.ObjectCollection.create()
+    n_profiles = 0
     for i in range(sketch.profiles.count):
-        profiles_vec.append(sketch.profiles.item(i))
+        profiles_oc.add(sketch.profiles.item(i))
+        n_profiles += 1
 
-    if len(profiles_vec) == 0:
+    if n_profiles == 0:
         sketch.deleteMe()
         raise RuntimeError(
             'No closed profiles found in the generated sketch.\n'
             'The pattern lines may not form enclosed shapes on this face. '
             'Try a larger Pattern Scale.')
 
-    # ── Step 4: apply Emboss feature ─────────────────────────────────────────
-    faces_vec = adsk.fusion.BRepFaceVector()
-    faces_vec.append(face)
-
-    emboss_feats = component.features.embossFeatures
-    inp = emboss_feats.createInput(
-        profiles_vec, faces_vec,
-        adsk.core.ValueInput.createByReal(depth_cm)
+    # ── Step 4: apply Extrude feature ────────────────────────────────────────
+    operation = (
+        adsk.fusion.FeatureOperations.CutFeatureOperation if is_cut
+        else adsk.fusion.FeatureOperations.JoinFeatureOperation
     )
-    inp.embossFeatureType = (
-        adsk.fusion.EmbossFeatureTypes.CutEmbossFeatureType if is_cut
-        else adsk.fusion.EmbossFeatureTypes.BossEmbossFeatureType
-    )
+    extrudes = component.features.extrudeFeatures
+    ext_input = extrudes.createInput(profiles_oc, operation)
+    ext_input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth_cm))
 
-    feature = emboss_feats.add(inp)
-    return feature, len(profiles_vec), sketch
+    feature = extrudes.add(ext_input)
+    return feature, n_profiles, sketch

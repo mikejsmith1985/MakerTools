@@ -805,11 +805,13 @@ def apply_image_texture_to_face(face, filepath, depth_mm, is_cut,
         )
 
     # ── 5. Collect closed profiles ─────────────────────────────────────────────
-    profiles_vec = adsk.core.BaseVector()
+    profiles_oc = adsk.core.ObjectCollection.create()
+    n_profiles = 0
     for prof in sketch.profiles:
-        profiles_vec.append(prof)
+        profiles_oc.add(prof)
+        n_profiles += 1
 
-    if len(profiles_vec) == 0:
+    if n_profiles == 0:
         sketch.deleteMe()
         raise RuntimeError(
             f'Sketch drawn ({n_drawn} elements) but Fusion found no closed profiles.\n\n'
@@ -821,20 +823,14 @@ def apply_image_texture_to_face(face, filepath, depth_mm, is_cut,
             '  • The pixel squares should always close — check for errors above'
         )
 
-    # ── 6. Emboss ──────────────────────────────────────────────────────────────
-    faces_vec = adsk.fusion.BRepFaceVector()
-    faces_vec.append(face)
-
-    emboss_features = rc.features.embossFeatures
-    emboss_input    = emboss_features.createInput(
-        profiles_vec, faces_vec,
-        adsk.core.ValueInput.createByReal(depth_cm)
+    # ── 6. Extrude ─────────────────────────────────────────────────────────────
+    operation = (
+        adsk.fusion.FeatureOperations.CutFeatureOperation if is_cut
+        else adsk.fusion.FeatureOperations.JoinFeatureOperation
     )
-    emboss_input.embossFeatureType = (
-        adsk.fusion.EmbossFeatureTypes.CutEmbossFeatureType
-        if is_cut else
-        adsk.fusion.EmbossFeatureTypes.BossEmbossFeatureType
-    )
+    extrudes = rc.features.extrudeFeatures
+    ext_input = extrudes.createInput(profiles_oc, operation)
+    ext_input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth_cm))
 
-    feature = emboss_features.add(emboss_input)
-    return feature, len(profiles_vec), sketch
+    feature = extrudes.add(ext_input)
+    return feature, n_profiles, sketch

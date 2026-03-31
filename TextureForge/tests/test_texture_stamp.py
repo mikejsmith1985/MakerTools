@@ -17,6 +17,7 @@ from core.texture_stamp import (
     _generate_brushed_metal,
     _generate_wood_grain,
     _generate_leather_hexagons,
+    _generate_honeycomb,
     MAX_PROFILES,
 )
 
@@ -264,6 +265,58 @@ def test_leather_hexagons_regularity():
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Honeycomb
+# ═════════════════════════════════════════════════════════════════════════════
+
+def test_honeycomb_basic():
+    """Honeycomb generates 4-point wall segment polygons within bounds."""
+    walls = _generate_honeycomb(5.0, 5.0, 0.6)
+    assert len(walls) > 0, "Should produce at least one wall segment"
+    assert len(walls) <= MAX_PROFILES
+
+    for i, pts in enumerate(walls):
+        assert len(pts) == 4, f"Wall {i} should have 4 corners, got {len(pts)}"
+        for (x, y) in pts:
+            assert isinstance(x, float) and isinstance(y, float)
+
+    print(f"PASS: honeycomb basic — {len(walls)} wall segments on 5×5cm face")
+
+
+def test_honeycomb_wall_shape():
+    """Each wall segment should be a valid thin rectangle (non-zero area)."""
+    walls = _generate_honeycomb(4.0, 4.0, 0.8)
+    for i, pts in enumerate(walls[:20]):
+        area = _polygon_area(pts)
+        assert area > 1e-8, f"Wall {i} has near-zero area: {area}"
+
+        # Width of the wall (shorter dimension) should be << length (longer dimension)
+        p0, p1, p2, p3 = pts
+        side_a = math.hypot(p1[0] - p0[0], p1[1] - p0[1])  # thickness
+        side_b = math.hypot(p2[0] - p1[0], p2[1] - p1[1])  # length
+        thin = min(side_a, side_b)
+        long = max(side_a, side_b)
+        assert long > thin * 2, \
+            f"Wall {i} is not thin: thin={thin:.5f}, long={long:.5f}"
+
+    print(f"PASS: honeycomb wall shape — {len(walls)} wall segments are thin rects")
+
+
+def test_honeycomb_no_duplicate_walls():
+    """Each unique edge should appear exactly once (dedup working)."""
+    walls = _generate_honeycomb(4.0, 4.0, 0.6)
+
+    # Represent each wall as a frozenset of rounded midpoints
+    midpoints = set()
+    for pts in walls:
+        p0, _, p2, _ = pts
+        mid = (round((p0[0] + p2[0]) / 2, 4), round((p0[1] + p2[1]) / 2, 4))
+        assert mid not in midpoints, f"Duplicate wall midpoint at {mid}"
+        midpoints.add(mid)
+
+    print(f"PASS: honeycomb no duplicates — {len(walls)} unique wall segments")
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # generate_pattern dispatcher
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -275,6 +328,7 @@ def test_dispatcher():
         'brushed_metal': 'rects',
         'wood_grain':    'polygons',
         'leather':       'polygons',
+        'honeycomb':     'polygons',
     }
     for key, expected_kind in expected.items():
         kind, prims = generate_pattern(key, 3.0, 3.0, 0.4)
@@ -336,6 +390,11 @@ if __name__ == '__main__':
 
     test_leather_hexagons_basic()
     test_leather_hexagons_regularity()
+    print()
+
+    test_honeycomb_basic()
+    test_honeycomb_wall_shape()
+    test_honeycomb_no_duplicate_walls()
     print()
 
     test_dispatcher()

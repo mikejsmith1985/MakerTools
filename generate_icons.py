@@ -244,6 +244,68 @@ def draw_stamp_texture():
     return c
 
 
+def _hex_pts(cx, cy, r, angle_offset=0.0):
+    """Return 6 (x,y) vertices of a regular hexagon."""
+    return [
+        (cx + r * math.cos(angle_offset + i * math.pi / 3),
+         cy + r * math.sin(angle_offset + i * math.pi / 3))
+        for i in range(6)
+    ]
+
+
+def _draw_hex_ring(c, cx, cy, r_outer, r_inner, color):
+    """Draw a hexagonal ring (outer hex filled, inner hex cleared with BG)."""
+    c.poly(_hex_pts(cx, cy, r_outer, math.pi / 6), color)
+    c.poly(_hex_pts(cx, cy, r_inner, math.pi / 6), TF_BG)
+
+
+def draw_honeycomb():
+    """Purple BG + honeycomb cell grid with visible walls."""
+    c = Canvas(S, S)
+    c.rect(0, 0, S, S, TF_BG, rx=8)
+
+    r_out = 11.0
+    r_in  =  8.0
+    col_pitch = r_out * math.sqrt(3)
+    row_pitch = r_out * 1.5
+
+    centers = []
+    row = 0
+    cy = 8.0
+    while cy < S + r_out:
+        cx = (col_pitch / 2 if row % 2 else 0) + col_pitch / 2
+        while cx < S + r_out:
+            centers.append((cx, cy))
+            cx += col_pitch
+        cy += row_pitch
+        row += 1
+
+    for (cx, cy) in centers:
+        _draw_hex_ring(c, cx, cy, r_out, r_in, WHITE)
+
+    # Re-apply rounded corners mask
+    _apply_round_mask(c, 8)
+    return c
+
+
+def _apply_round_mask(c, rx):
+    """Clear pixels outside the rounded-rect boundary (for layered icons)."""
+    for py in range(c.h):
+        for px in range(c.w):
+            lx, ly = px, py
+            inside = True
+            if lx < rx and ly < rx and math.hypot(lx - rx + 0.5, ly - rx + 0.5) > rx:
+                inside = False
+            elif lx >= c.w - rx and ly < rx and math.hypot(lx - (c.w - rx) + 0.5, ly - rx + 0.5) > rx:
+                inside = False
+            elif lx < rx and ly >= c.h - rx and math.hypot(lx - rx + 0.5, ly - (c.h - rx) + 0.5) > rx:
+                inside = False
+            elif lx >= c.w - rx and ly >= c.h - rx and math.hypot(lx - (c.w - rx) + 0.5, ly - (c.h - rx) + 0.5) > rx:
+                inside = False
+            if not inside:
+                c.px[py * c.w + px] = [0, 0, 0, 0]
+
+
 def draw_image_texture():
     """Purple BG + photo frame + image scene + texture grid overlay."""
     c = Canvas(S, S)
@@ -420,6 +482,7 @@ ICONS = [
     # (subfolder_relative_to_addon, draw_function)
     ('TextureForge/resources/StampTexture',  draw_stamp_texture),
     ('TextureForge/resources/ImageTexture',  draw_image_texture),
+    ('TextureForge/resources/Honeycomb',     draw_honeycomb),
     ('PathMaker/resources/GenerateCAM',      draw_generate_cam),
     ('PathMaker/resources/ImportTool',       draw_import_tool),
     ('PathMaker/resources/ManageTools',      draw_manage_tools),

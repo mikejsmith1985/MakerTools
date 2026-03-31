@@ -51,6 +51,12 @@ TEXTURES = {
         'default_scale_mm': 3.5,
         'default_depth_mm': 0.30,
     },
+    'honeycomb': {
+        'name': 'Honeycomb',
+        'description': 'Thin-walled hexagonal cell grid — raised walls with open cell voids',
+        'default_scale_mm': 5.0,
+        'default_depth_mm': 0.40,
+    },
 }
 
 # Safety cap: limits number of sketch profiles to avoid Fusion 360 slowdown
@@ -216,6 +222,75 @@ def _generate_leather_hexagons(width_cm, height_cm, scale_cm):
     return hexagons
 
 
+def _generate_honeycomb(width_cm, height_cm, scale_cm):
+    """
+    Honeycomb: each hexagonal cell wall is represented as a thin rotated-rectangle
+    polygon (4 corners).  Only unique walls are emitted — shared edges between
+    adjacent cells are drawn once to avoid duplicate-line confusion in Fusion's
+    sketch solver.
+
+    Wall thickness = 10% of scale.  Circumradius = 50% of scale so cells are
+    edge-to-edge with no gap (walls are the only solid material).
+    """
+    r = scale_cm * 0.50
+    wall_t = scale_cm * 0.10
+
+    col_pitch = r * math.sqrt(3)
+    row_pitch = r * 1.5
+
+    walls = []
+    seen = set()
+
+    row = 0
+    cy = r
+    while cy - r < height_cm + row_pitch:
+        row_offset = (col_pitch / 2) if (row % 2) else 0.0
+        cx = row_offset + col_pitch / 2
+        while cx - r < width_cm + col_pitch:
+            verts = [
+                (cx + r * math.cos(math.pi / 6 + i * math.pi / 3),
+                 cy + r * math.sin(math.pi / 6 + i * math.pi / 3))
+                for i in range(6)
+            ]
+
+            for i in range(6):
+                v0 = verts[i]
+                v1 = verts[(i + 1) % 6]
+
+                key = tuple(sorted([
+                    (round(v0[0], 4), round(v0[1], 4)),
+                    (round(v1[0], 4), round(v1[1], 4)),
+                ]))
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                if (max(v0[0], v1[0]) < 0 or min(v0[0], v1[0]) > width_cm or
+                        max(v0[1], v1[1]) < 0 or min(v0[1], v1[1]) > height_cm):
+                    continue
+
+                dx, dy = v1[0] - v0[0], v1[1] - v0[1]
+                length = math.hypot(dx, dy)
+                if length < 1e-9:
+                    continue
+                px = -dy / length * wall_t / 2
+                py =  dx / length * wall_t / 2
+
+                walls.append([
+                    (v0[0] - px, v0[1] - py),
+                    (v0[0] + px, v0[1] + py),
+                    (v1[0] + px, v1[1] + py),
+                    (v1[0] - px, v1[1] - py),
+                ])
+                if len(walls) >= MAX_PROFILES:
+                    return walls
+
+            cx += col_pitch
+        cy += row_pitch
+        row += 1
+    return walls
+
+
 # ── Public dispatcher ────────────────────────────────────────────────────────
 
 def generate_pattern(texture_key, width_cm, height_cm, scale_cm):
@@ -235,6 +310,8 @@ def generate_pattern(texture_key, width_cm, height_cm, scale_cm):
         return 'polygons', _generate_wood_grain(width_cm, height_cm, scale_cm)
     elif texture_key == 'leather':
         return 'polygons', _generate_leather_hexagons(width_cm, height_cm, scale_cm)
+    elif texture_key == 'honeycomb':
+        return 'polygons', _generate_honeycomb(width_cm, height_cm, scale_cm)
     else:
         raise ValueError(f'Unknown texture key: {texture_key!r}')
 

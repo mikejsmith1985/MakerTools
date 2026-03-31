@@ -18,6 +18,7 @@ Supported textures:
   wood_grain    — organic wavy horizontal bands
   brushed_metal — fine parallel horizontal grooves
   leather       — hexagonal bump array
+  honeycomb     — thin-walled hexagonal cell grid (wall segments raised)
 
 All internal geometry is in CENTIMETRES (Fusion 360's native unit).
 """
@@ -55,6 +56,12 @@ TEXTURES = {
         'description': 'Hexagonal bump grid simulating leather grain texture',
         'default_scale_mm': 3.5,
         'default_depth_mm': 0.30,
+    },
+    'honeycomb': {
+        'name': 'Honeycomb',
+        'description': 'Thin-walled hexagonal cell grid — raised walls with open cell voids',
+        'default_scale_mm': 5.0,
+        'default_depth_mm': 0.40,
     },
 }
 
@@ -219,9 +226,84 @@ def _generate_leather_hexagons(width_cm, height_cm, scale_cm):
         cy += row_pitch
         row += 1
     return hexagons
+def _generate_honeycomb(width_cm, height_cm, scale_cm):
+    """
+    Honeycomb: each hexagonal cell wall is represented as a thin rotated-rectangle
+    polygon (4 corners).  Only unique walls are emitted — shared edges between
+    adjacent cells are drawn once to avoid duplicate-line confusion in Fusion's
+    sketch solver.
+
+    Wall thickness = 10% of scale.  Circumradius = 50% of scale so cells are
+    edge-to-edge with no gap (walls are the only solid material).
+    """
+    r = scale_cm * 0.50           # circumradius
+    wall_t = scale_cm * 0.10      # wall thickness
+
+    # Pointy-top hex grid
+    col_pitch = r * math.sqrt(3)
+    row_pitch = r * 1.5
+
+    walls = []
+    seen = set()
+
+    row = 0
+    cy = r
+    while cy - r < height_cm + row_pitch:
+        row_offset = (col_pitch / 2) if (row % 2) else 0.0
+        cx = row_offset + col_pitch / 2
+        while cx - r < width_cm + col_pitch:
+            # 6 vertices — pointy-top orientation
+            verts = [
+                (cx + r * math.cos(math.pi / 6 + i * math.pi / 3),
+                 cy + r * math.sin(math.pi / 6 + i * math.pi / 3))
+                for i in range(6)
+            ]
+
+            for i in range(6):
+                v0 = verts[i]
+                v1 = verts[(i + 1) % 6]
+
+                # Deduplicate shared edges using sorted rounded endpoints
+                key = tuple(sorted([
+                    (round(v0[0], 4), round(v0[1], 4)),
+                    (round(v1[0], 4), round(v1[1], 4)),
+                ]))
+                if key in seen:
+                    continue
+                seen.add(key)
+
+                # Skip walls entirely outside the face bounds
+                mx = max(v0[0], v1[0])
+                my = max(v0[1], v1[1])
+                lx = min(v0[0], v1[0])
+                ly = min(v0[1], v1[1])
+                if mx < 0 or lx > width_cm or my < 0 or ly > height_cm:
+                    continue
+
+                # Build a thin rectangle centred on the wall edge
+                dx, dy = v1[0] - v0[0], v1[1] - v0[1]
+                length = math.hypot(dx, dy)
+                if length < 1e-9:
+                    continue
+                px = -dy / length * wall_t / 2   # perpendicular offset
+                py =  dx / length * wall_t / 2
+
+                walls.append([
+                    (v0[0] - px, v0[1] - py),
+                    (v0[0] + px, v0[1] + py),
+                    (v1[0] + px, v1[1] + py),
+                    (v1[0] - px, v1[1] - py),
+                ])
+                if len(walls) >= MAX_PROFILES:
+                    return walls
+
+            cx += col_pitch
+        cy += row_pitch
+        row += 1
+    return walls
 
 
-# ── Public dispatcher ────────────────────────────────────────────────────────
+
 
 def generate_pattern(texture_key, width_cm, height_cm, scale_cm):
     """
@@ -240,6 +322,8 @@ def generate_pattern(texture_key, width_cm, height_cm, scale_cm):
         return 'polygons', _generate_wood_grain(width_cm, height_cm, scale_cm)
     elif texture_key == 'leather':
         return 'polygons', _generate_leather_hexagons(width_cm, height_cm, scale_cm)
+    elif texture_key == 'honeycomb':
+        return 'polygons', _generate_honeycomb(width_cm, height_cm, scale_cm)
     else:
         raise ValueError(f'Unknown texture key: {texture_key!r}')
 

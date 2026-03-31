@@ -17,6 +17,7 @@ MIN_SCALE_PRINT_MM = {
     'wood_grain':    2.0,
     'brushed_metal': 0.5,
     'leather':       2.0,
+    'honeycomb':     3.0,
 }
 
 # Approximate minimum recommended tool diameter for CNC per texture
@@ -26,6 +27,7 @@ CNC_TOOL_HINTS = {
     'wood_grain':    ('1/8" ball-nose end mill', 3.2),
     'brushed_metal': ('1/32" ball-nose or V-bit', 0.8),
     'leather':       ('1/8" ball-nose end mill', 3.2),
+    'honeycomb':     ('V-bit or 1/8" flat end mill', 3.2),
 }
 
 

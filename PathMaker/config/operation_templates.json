@@ -1,0 +1,285 @@
+{
+    "description": "CAM operation templates mapped to detected feature types. Each template defines the Fusion 360 operation type and default parameters.",
+    "feature_operation_map": {
+        "through_hole": {
+            "operations": [
+                {
+                    "name": "Drill {diameter} Through Hole",
+                    "fusion_operation": "drilling",
+                    "strategy": "drill",
+                    "parameters": {
+                        "cycle_type": "drilling",
+                        "peck_depth": "auto",
+                        "dwell_at_bottom": false,
+                        "breakthrough_distance_mm": 1.0
+                    },
+                    "notes": "If drill bit diameter matches hole, single drill op. If no matching drill, use 2D Bore."
+                },
+                {
+                    "name": "Bore {diameter} Through Hole",
+                    "fusion_operation": "bore",
+                    "strategy": "2d_bore",
+                    "fallback": true,
+                    "parameters": {
+                        "multiple_depths": true,
+                        "finishing_pass": true,
+                        "finishing_stepover": 0.1
+                    },
+                    "notes": "Used when no matching drill bit exists. Helical bore with finishing pass."
+                }
+            ],
+            "tool_selection": {
+                "primary": "matching_drill_bit",
+                "fallback": "smallest_endmill_that_fits"
+            }
+        },
+        "blind_hole": {
+            "operations": [
+                {
+                    "name": "Drill {diameter} Blind Hole",
+                    "fusion_operation": "drilling",
+                    "strategy": "drill",
+                    "parameters": {
+                        "cycle_type": "drilling",
+                        "peck_depth": "auto",
+                        "dwell_at_bottom": false
+                    }
+                },
+                {
+                    "name": "Bore {diameter} Blind Hole",
+                    "fusion_operation": "bore",
+                    "strategy": "2d_bore",
+                    "fallback": true,
+                    "parameters": {
+                        "multiple_depths": true,
+                        "finishing_pass": true,
+                        "flat_bottom": true
+                    },
+                    "notes": "Used for flat-bottom holes or when no matching drill exists."
+                }
+            ],
+            "tool_selection": {
+                "primary": "matching_drill_bit",
+                "fallback": "smallest_endmill_that_fits"
+            }
+        },
+        "pocket": {
+            "operations": [
+                {
+                    "name": "Adaptive Clear {name}",
+                    "fusion_operation": "adaptive2d",
+                    "strategy": "adaptive_clearing",
+                    "phase": "roughing",
+                    "parameters": {
+                        "optimal_load_percent": 40,
+                        "stock_to_leave_mm": 0.2,
+                        "stock_to_leave_radial_mm": 0.2,
+                        "stock_to_leave_axial_mm": 0.1,
+                        "multiple_depths": true,
+                        "helix_ramp_entry": true,
+                        "entry_radius_percent": 50
+                    }
+                },
+                {
+                    "name": "Finish Pocket {name}",
+                    "fusion_operation": "pocket2d",
+                    "strategy": "pocket_finishing",
+                    "phase": "finishing",
+                    "parameters": {
+                        "stock_to_leave_mm": 0.0,
+                        "stepover_percent": 50,
+                        "finishing_overlap_percent": 10,
+                        "multiple_depths": false
+                    }
+                }
+            ],
+            "tool_selection": {
+                "primary": "largest_endmill_that_fits",
+                "finishing": "same_or_smaller"
+            }
+        },
+        "open_profile": {
+            "operations": [
+                {
+                    "name": "Contour {name}",
+                    "fusion_operation": "contour2d",
+                    "strategy": "profile_contour",
+                    "phase": "finishing",
+                    "parameters": {
+                        "compensation": "in_computer",
+                        "multiple_depths": true,
+                        "stock_to_leave_mm": 0.0,
+                        "lead_in_radius_percent": 50,
+                        "tabs_enabled": true,
+                        "tab_height_mm": 2.0,
+                        "tab_width_mm": 6.0,
+                        "tab_count": "auto"
+                    }
+                }
+            ],
+            "tool_selection": {
+                "primary": "appropriate_endmill",
+                "notes": "Match corner radius to fillet requirements. Down-cut for wood top surface."
+            }
+        },
+        "outer_profile": {
+            "operations": [
+                {
+                    "name": "Rough Profile {name}",
+                    "fusion_operation": "adaptive2d",
+                    "strategy": "adaptive_clearing",
+                    "phase": "roughing",
+                    "parameters": {
+                        "optimal_load_percent": 40,
+                        "stock_to_leave_mm": 0.3,
+                        "multiple_depths": true,
+                        "helix_ramp_entry": true,
+                        "outside_machining": true
+                    }
+                },
+                {
+                    "name": "Finish Profile {name}",
+                    "fusion_operation": "contour2d",
+                    "strategy": "profile_contour",
+                    "phase": "finishing",
+                    "parameters": {
+                        "compensation": "in_computer",
+                        "multiple_depths": true,
+                        "stock_to_leave_mm": 0.0,
+                        "tabs_enabled": true,
+                        "tab_height_mm": 2.0,
+                        "tab_width_mm": 6.0,
+                        "tab_count": "auto"
+                    }
+                }
+            ],
+            "tool_selection": {
+                "primary": "largest_endmill_for_features",
+                "notes": "Must respect all fillet radii on outer profile. Tool radius <= smallest fillet radius."
+            }
+        },
+        "boss": {
+            "operations": [
+                {
+                    "name": "Clear Around Boss {name}",
+                    "fusion_operation": "adaptive2d",
+                    "strategy": "adaptive_clearing",
+                    "phase": "roughing",
+                    "parameters": {
+                        "optimal_load_percent": 40,
+                        "stock_to_leave_mm": 0.2,
+                        "multiple_depths": true,
+                        "rest_machining": true
+                    }
+                }
+            ],
+            "tool_selection": {
+                "primary": "largest_endmill_that_fits"
+            }
+        },
+        "chamfer": {
+            "operations": [
+                {
+                    "name": "Chamfer {name}",
+                    "fusion_operation": "chamfer2d",
+                    "strategy": "chamfer",
+                    "phase": "finishing",
+                    "parameters": {
+                        "chamfer_width": "auto",
+                        "tip_offset_mm": 0.5
+                    }
+                }
+            ],
+            "tool_selection": {
+                "primary": "v_bit_matching_angle",
+                "fallback": "chamfer_mill"
+            }
+        },
+        "face": {
+            "operations": [
+                {
+                    "name": "Face Top",
+                    "fusion_operation": "face",
+                    "strategy": "facing",
+                    "phase": "first",
+                    "parameters": {
+                        "stepover_percent": 50,
+                        "stock_to_leave_mm": 0.0,
+                        "multiple_passes": false,
+                        "face_depth_mm": 0.5
+                    }
+                }
+            ],
+            "tool_selection": {
+                "primary": "largest_flat_endmill",
+                "notes": "Largest available flat end mill for fastest facing."
+            }
+        },
+        "3d_surface": {
+            "operations": [
+                {
+                    "name": "3D Adaptive Rough {name}",
+                    "fusion_operation": "adaptive3d",
+                    "strategy": "adaptive_clearing_3d",
+                    "phase": "roughing",
+                    "parameters": {
+                        "stock_to_leave_mm": 0.3,
+                        "multiple_depths": true,
+                        "helix_ramp_entry": true
+                    }
+                },
+                {
+                    "name": "3D Parallel Finish {name}",
+                    "fusion_operation": "parallel",
+                    "strategy": "parallel_finishing",
+                    "phase": "finishing",
+                    "parameters": {
+                        "stepover_percent": 10,
+                        "stock_to_leave_mm": 0.0,
+                        "direction": "along_x"
+                    }
+                }
+            ],
+            "tool_selection": {
+                "roughing": "largest_flat_endmill",
+                "finishing": "ball_endmill"
+            }
+        }
+    },
+    "operation_ordering": [
+        "face",
+        "adaptive_clearing",
+        "adaptive_clearing_3d",
+        "drilling",
+        "pocket_finishing",
+        "profile_contour",
+        "parallel_finishing",
+        "chamfer"
+    ],
+    "quality_presets": {
+        "draft": {
+            "name": "Draft (Fast)",
+            "stock_to_leave_multiplier": 1.5,
+            "stepover_multiplier": 1.5,
+            "skip_finishing": true,
+            "feed_multiplier": 1.0,
+            "doc_multiplier": 1.2
+        },
+        "standard": {
+            "name": "Standard",
+            "stock_to_leave_multiplier": 1.0,
+            "stepover_multiplier": 1.0,
+            "skip_finishing": false,
+            "feed_multiplier": 1.0,
+            "doc_multiplier": 1.0
+        },
+        "fine": {
+            "name": "Fine (Slow, Smooth)",
+            "stock_to_leave_multiplier": 0.8,
+            "stepover_multiplier": 0.6,
+            "skip_finishing": false,
+            "feed_multiplier": 0.8,
+            "doc_multiplier": 0.7
+        }
+    }
+}

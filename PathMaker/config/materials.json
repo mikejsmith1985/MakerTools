@@ -1,0 +1,127 @@
+{
+    "materials": {
+        "aluminum_6061_t6": {
+            "name": "Aluminum 6061-T6",
+            "category": "metal",
+            "hardness": "medium",
+            "machinability_rating": 0.8,
+            "sfm_range": {"min": 300, "max": 800},
+            "chipload_table": {
+                "1/8": {"min": 0.0005, "max": 0.002, "recommended": 0.001},
+                "3/16": {"min": 0.001, "max": 0.0025, "recommended": 0.0015},
+                "1/4": {"min": 0.001, "max": 0.003, "recommended": 0.002},
+                "3/8": {"min": 0.002, "max": 0.004, "recommended": 0.003},
+                "1/2": {"min": 0.002, "max": 0.005, "recommended": 0.003}
+            },
+            "chipload_unit": "inches per tooth",
+            "doc_multiplier": 0.5,
+            "woc_multiplier_roughing": 0.4,
+            "woc_multiplier_finishing": 0.1,
+            "preferred_flute_count": 3,
+            "preferred_tool_material": "carbide",
+            "preferred_coating": ["ZrN", "TiB2", "uncoated"],
+            "coolant": "recommended",
+            "coolant_notes": "WD-40 or isopropyl alcohol as mist. Prevents aluminum welding to tool.",
+            "notes": "Most common aluminum alloy for hobby CNC. Good machinability. Use single-flute or 2-flute for better chip evacuation if no coolant. 3-flute with coolant is optimal."
+        },
+        "aluminum_6063": {
+            "name": "Aluminum 6063",
+            "category": "metal",
+            "hardness": "soft",
+            "machinability_rating": 0.7,
+            "sfm_range": {"min": 400, "max": 900},
+            "chipload_table": {
+                "1/8": {"min": 0.0005, "max": 0.002, "recommended": 0.001},
+                "1/4": {"min": 0.001, "max": 0.003, "recommended": 0.002},
+                "3/8": {"min": 0.002, "max": 0.004, "recommended": 0.003},
+                "1/2": {"min": 0.002, "max": 0.005, "recommended": 0.003}
+            },
+            "chipload_unit": "inches per tooth",
+            "doc_multiplier": 0.5,
+            "woc_multiplier_roughing": 0.4,
+            "woc_multiplier_finishing": 0.1,
+            "preferred_flute_count": 2,
+            "preferred_tool_material": "carbide",
+            "preferred_coating": ["ZrN", "TiB2", "uncoated"],
+            "coolant": "recommended",
+            "coolant_notes": "Softer and gummier than 6061. Lubrication critical to prevent chip welding.",
+            "notes": "Common in extrusions. Softer than 6061, tends to be gummier. Prefer 2-flute for chip evacuation."
+        },
+        "plywood_baltic_birch": {
+            "name": "Baltic Birch Plywood",
+            "category": "wood",
+            "hardness": "medium",
+            "machinability_rating": 0.85,
+            "sfm_range": {"min": 400, "max": 600},
+            "chipload_table": {
+                "1/8": {"min": 0.003, "max": 0.006, "recommended": 0.004},
+                "1/4": {"min": 0.004, "max": 0.010, "recommended": 0.007},
+                "3/8": {"min": 0.006, "max": 0.012, "recommended": 0.009},
+                "1/2": {"min": 0.008, "max": 0.015, "recommended": 0.011}
+            },
+            "chipload_unit": "inches per tooth",
+            "doc_multiplier": 1.0,
+            "woc_multiplier_roughing": 0.5,
+            "woc_multiplier_finishing": 0.15,
+            "preferred_flute_count": 2,
+            "preferred_tool_material": "carbide",
+            "preferred_coating": ["uncoated"],
+            "coolant": "none",
+            "coolant_notes": "No coolant needed. Use dust collection.",
+            "notes": "Glue layers are abrasive — carbide tools recommended. Compression bits give cleanest edges on plywood. Down-cut on top surface, up-cut on bottom."
+        },
+        "hardwood_oak": {
+            "name": "Hardwood (Oak/Maple/Walnut)",
+            "category": "wood",
+            "hardness": "hard",
+            "machinability_rating": 0.75,
+            "sfm_range": {"min": 400, "max": 600},
+            "chipload_table": {
+                "1/8": {"min": 0.002, "max": 0.005, "recommended": 0.003},
+                "1/4": {"min": 0.003, "max": 0.008, "recommended": 0.005},
+                "3/8": {"min": 0.004, "max": 0.010, "recommended": 0.007},
+                "1/2": {"min": 0.005, "max": 0.012, "recommended": 0.008}
+            },
+            "chipload_unit": "inches per tooth",
+            "doc_multiplier": 0.8,
+            "woc_multiplier_roughing": 0.45,
+            "woc_multiplier_finishing": 0.12,
+            "preferred_flute_count": 2,
+            "preferred_tool_material": "carbide",
+            "preferred_coating": ["uncoated"],
+            "coolant": "none",
+            "coolant_notes": "Dust collection important. Watch for burning on slow feeds.",
+            "notes": "Cut with grain direction when possible. Down-cut spiral for clean top edge. Avoid dwelling — causes burn marks."
+        },
+        "softwood_pine": {
+            "name": "Softwood (Pine/Cedar/Spruce)",
+            "category": "wood",
+            "hardness": "soft",
+            "machinability_rating": 0.95,
+            "sfm_range": {"min": 600, "max": 800},
+            "chipload_table": {
+                "1/8": {"min": 0.003, "max": 0.008, "recommended": 0.005},
+                "1/4": {"min": 0.005, "max": 0.012, "recommended": 0.008},
+                "3/8": {"min": 0.007, "max": 0.015, "recommended": 0.010},
+                "1/2": {"min": 0.008, "max": 0.018, "recommended": 0.012}
+            },
+            "chipload_unit": "inches per tooth",
+            "doc_multiplier": 1.0,
+            "woc_multiplier_roughing": 0.5,
+            "woc_multiplier_finishing": 0.15,
+            "preferred_flute_count": 2,
+            "preferred_tool_material": "carbide",
+            "preferred_coating": ["uncoated"],
+            "coolant": "none",
+            "coolant_notes": "Dust collection. Pine is sappy — clean tool frequently.",
+            "notes": "Easy to cut. Higher feeds prevent burning. Pine sap can gum up tools — use higher RPM and feed. Cedar is very soft — reduce depth of cut to prevent tearout."
+        }
+    },
+    "material_schema": {
+        "description": "Schema for AI-generated material profiles. AI must return JSON matching this structure.",
+        "required_fields": ["name", "category", "hardness", "machinability_rating", "sfm_range", "chipload_table", "doc_multiplier", "woc_multiplier_roughing", "woc_multiplier_finishing", "preferred_flute_count", "preferred_tool_material", "notes"],
+        "category_options": ["metal", "wood", "plastic", "composite", "foam"],
+        "hardness_options": ["very_soft", "soft", "medium", "hard", "very_hard"],
+        "chipload_table_keys": "Tool diameters as fractions (e.g., '1/4') with min/max/recommended values in inches per tooth"
+    }
+}

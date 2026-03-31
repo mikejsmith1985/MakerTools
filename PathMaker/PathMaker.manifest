@@ -1,0 +1,13 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "addin",
+    "id": "pathmaker-ai-cam-generator",
+    "author": "MakerTools",
+    "description": {
+        "": "PathMaker — AI-powered 1-click CAM for Fusion 360. Build your tool library from Amazon links, generate CNC toolpaths automatically, and master 2-sided carving. Optimized for the Onefinity Machinist with Makita RT0701C."
+    },
+    "version": "1.0.0",
+    "runOnStartup": true,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

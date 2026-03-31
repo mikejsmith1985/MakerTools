@@ -1,0 +1,3 @@
+# This file keeps the data/ folder in git.
+# Your personal tool library and settings are stored here and are NOT committed
+# (they are listed in .gitignore). PathMaker creates them on first run.

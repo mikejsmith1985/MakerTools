@@ -1,0 +1,40 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+
+# User data (personal settings and tool library — not shared)
+PathMaker/data/user_settings.json
+PathMaker/data/tool_library.json
+TextureForge/data/
+
+# Fusion 360 generated files
+*.f3d
+*.f3z
+
+# Windows
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Mac
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editor folders
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test artifacts
+.coverage
+htmlcov/
+
+# Distribution
+dist/
+build/
+*.egg-info/

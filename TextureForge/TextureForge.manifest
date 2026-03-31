@@ -1,0 +1,13 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "addin",
+    "id": "textureforge-surface-stamp",
+    "author": "MakerTools",
+    "description": {
+        "": "TextureForge — Stamp procedural or image-based surface textures onto any Fusion 360 model face. Carbon fiber, knurl, wood grain, brushed metal, leather — or import your own SVG/PNG/BMP. Works for both 3D printing and CNC milling."
+    },
+    "version": "1.0.0",
+    "runOnStartup": true,
+    "supportedOS": "windows|mac",
+    "editEnabled": true
+}

@@ -1,0 +1,50 @@
+{
+    "machines": {
+        "onefinity_machinist": {
+            "name": "Onefinity Machinist",
+            "controller": "Buildbotics",
+            "work_area": {
+                "x": 406,
+                "y": 406,
+                "z": 114,
+                "unit": "mm"
+            },
+            "spindle": {
+                "type": "Makita RT0701C Compact Router",
+                "min_rpm": 9600,
+                "max_rpm": 30000,
+                "speed_settings": [9600, 12000, 16500, 21500, 26500, 30000],
+                "dial_labels": ["1", "2", "3", "4", "5", "6"],
+                "collet_sizes": ["1/4 inch", "1/8 inch"],
+                "notes": "Dial settings 1-6 correspond to ~9600/12000/16500/21500/26500/30000 RPM (measured under no-load). Not electronically controlled — user must set dial manually."
+            },
+            "max_feed_rate": {
+                "xy": 5000,
+                "z": 2500,
+                "rapid_xy": 10000,
+                "rapid_z": 5000,
+                "unit": "mm/min"
+            },
+            "rigidity_factor": 0.6,
+            "acceleration": {
+                "xy": 500,
+                "z": 250,
+                "unit": "mm/s2",
+                "notes": "Belt-driven axes — conservative acceleration to prevent lost steps"
+            },
+            "post_processor": "onefinity_fusion360.cps",
+            "safety_defaults": {
+                "safe_retract_height_mm": 10.0,
+                "spindle_on_delay_seconds": 3,
+                "tool_change_pause": true,
+                "min_tab_height_mm": 2.0,
+                "default_tab_count": 4,
+                "default_tab_width_mm": 6.0,
+                "ramp_entry": true,
+                "climb_milling": true,
+                "max_plunge_angle_degrees": 3.0
+            }
+        }
+    },
+    "active_machine": "onefinity_machinist"
+}

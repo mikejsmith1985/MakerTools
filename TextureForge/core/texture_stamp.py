@@ -446,9 +446,11 @@ def apply_texture_to_face(face, texture_key, scale_mm, depth_mm, is_cut=False):
     sketch.isComputeDeferred = False
 
     # ── Step 3: collect closed profiles ─────────────────────────────────────
-    profiles_col = [sketch.profiles.item(i) for i in range(sketch.profiles.count)]
+    profiles_vec = adsk.core.BaseVector()
+    for i in range(sketch.profiles.count):
+        profiles_vec.append(sketch.profiles.item(i))
 
-    if len(profiles_col) == 0:
+    if len(profiles_vec) == 0:
         sketch.deleteMe()
         raise RuntimeError(
             'No closed profiles found in the generated sketch.\n'
@@ -456,11 +458,12 @@ def apply_texture_to_face(face, texture_key, scale_mm, depth_mm, is_cut=False):
             'Try a larger Pattern Scale.')
 
     # ── Step 4: apply Emboss feature ─────────────────────────────────────────
-    faces_col = [face]
+    faces_vec = adsk.fusion.BRepFaceVector()
+    faces_vec.append(face)
 
     emboss_feats = component.features.embossFeatures
     inp = emboss_feats.createInput(
-        profiles_col, faces_col,
+        profiles_vec, faces_vec,
         adsk.core.ValueInput.createByReal(depth_cm)
     )
     inp.embossFeatureType = (
@@ -469,4 +472,4 @@ def apply_texture_to_face(face, texture_key, scale_mm, depth_mm, is_cut=False):
     )
 
     feature = emboss_feats.add(inp)
-    return feature, len(profiles_col), sketch
+    return feature, len(profiles_vec), sketch

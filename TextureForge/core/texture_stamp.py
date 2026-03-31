@@ -464,9 +464,17 @@ def apply_texture_to_face(face, texture_key, scale_mm, depth_mm, is_cut=False):
         adsk.fusion.FeatureOperations.CutFeatureOperation if is_cut
         else adsk.fusion.FeatureOperations.JoinFeatureOperation
     )
-    extrudes = component.features.extrudeFeatures
+    extrudes  = component.features.extrudeFeatures
     ext_input = extrudes.createInput(profiles_oc, operation)
-    ext_input.setDistanceExtent(False, adsk.core.ValueInput.createByReal(depth_cm))
+
+    depth_vi = adsk.core.ValueInput.createByReal(depth_cm)
+    dist_def = adsk.fusion.DistanceExtentDefinition.create(depth_vi)
+    # Boss  → PositiveExtentDirection = outward from face (raises material)
+    # Deboss → NegativeExtentDirection = inward into body  (cuts into material)
+    direction = (adsk.fusion.ExtentDirections.NegativeExtentDirection if is_cut
+                 else adsk.fusion.ExtentDirections.PositiveExtentDirection)
+    ext_input.setOneSideExtent(dist_def, direction)
+    ext_input.participantBodies = [face.body]
 
     feature = extrudes.add(ext_input)
     return feature, n_profiles, sketch

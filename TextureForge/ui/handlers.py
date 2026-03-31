@@ -45,42 +45,28 @@ class TextureInputChangedHandler(adsk.core.InputChangedEventHandler):
             inputs  = args.inputs
 
             type_input  = inputs.itemById('textureType')
-            mode_input  = inputs.itemById('outputMode')
             scale_input = inputs.itemById('textureScale')
             depth_input = inputs.itemById('textureDepth')
-            hint_box    = inputs.itemById('cncHint')
+            hint_box    = inputs.itemById('patternHint')
 
             if not (type_input and scale_input and depth_input):
                 return
 
-            tex_idx  = type_input.selectedItem.index
-            tex_key  = list(TEXTURES.keys())[tex_idx]
-            info     = TEXTURES[tex_key]
-            is_cnc   = mode_input and mode_input.selectedItem.index == 1
+            tex_idx = type_input.selectedItem.index
+            tex_key = list(TEXTURES.keys())[tex_idx]
+            info    = TEXTURES[tex_key]
 
-            if changed.id in ('textureType', 'outputMode'):
-                if is_cnc:
-                    # CNC: push scale up to at least 2× minimum tool diameter
-                    tool_hint, min_tool_mm = CNC_TOOL_HINTS.get(tex_key, ('small end mill', 3.2))
-                    cnc_scale = max(info['default_scale_mm'], min_tool_mm * 2.5)
-                    scale_input.value = cnc_scale / 10.0
-                    depth_input.value = max(info['default_depth_mm'], 0.4) / 10.0
-                    if hint_box:
-                        hint_box.text = (
-                            f'<b>CNC Mode — {tex_key.replace("_", " ").title()}</b><br>'
-                            f'Recommended tool: <b>{tool_hint}</b><br>'
-                            f'Pattern scale must be ≥ {min_tool_mm * 2:.1f}mm (2× tool dia).<br>'
-                            f'After stamping, run AutoPath to generate toolpaths for this texture.'
-                        )
-                else:
-                    scale_input.value = info['default_scale_mm'] / 10.0
-                    depth_input.value = info['default_depth_mm'] / 10.0
-                    if hint_box:
-                        hint_box.text = (
-                            f'<b>3D Print Mode — {tex_key.replace("_", " ").title()}</b><br>'
-                            f'Recommended depth: ≥ 2× layer height (e.g. 0.4mm for 0.2mm layers).<br>'
-                            f'Export as STL after stamping — the texture is real geometry.'
-                        )
+            if changed.id == 'textureType':
+                scale_input.value = info['default_scale_mm'] / 10.0
+                depth_input.value = info['default_depth_mm'] / 10.0
+                if hint_box:
+                    tool_hint, min_tool_mm = CNC_TOOL_HINTS.get(tex_key, ('small end mill', 3.0))
+                    hint_box.text = (
+                        f'<b>{info["name"]}</b><br>'
+                        f'Default scale: {info["default_scale_mm"]}mm | '
+                        f'Default depth: {info["default_depth_mm"]}mm<br>'
+                        f'CNC: {tool_hint}'
+                    )
         except Exception:
             pass  # non-critical UI update
 
@@ -110,7 +96,6 @@ class TextureExecuteHandler(adsk.core.CommandEventHandler):
 
             sel_input   = inputs.itemById('textureFace')
             type_input  = inputs.itemById('textureType')
-            mode_input  = inputs.itemById('outputMode')
             scale_input = inputs.itemById('textureScale')
             depth_input = inputs.itemById('textureDepth')
             cut_input   = inputs.itemById('textureCut')
@@ -122,7 +107,6 @@ class TextureExecuteHandler(adsk.core.CommandEventHandler):
             face        = sel_input.selection(0).entity
             tex_idx     = type_input.selectedItem.index if type_input else 0
             texture_key = list(TEXTURES.keys())[tex_idx]
-            is_cnc      = mode_input and mode_input.selectedItem.index == 1
             scale_mm    = (scale_input.value * 10.0) if scale_input else 2.5
             depth_mm    = (depth_input.value * 10.0) if depth_input else 0.3
             is_cut      = cut_input.value if cut_input else False
@@ -137,19 +121,6 @@ class TextureExecuteHandler(adsk.core.CommandEventHandler):
                     'TextureForge — Scale Warning')
                 return
 
-            if is_cnc:
-                _, min_tool_mm = CNC_TOOL_HINTS.get(texture_key, ('end mill', 3.2))
-                if scale_mm < min_tool_mm * 2:
-                    tool_hint, _ = CNC_TOOL_HINTS[texture_key]
-                    ui.messageBox(
-                        f'CNC Warning: Pattern Scale {scale_mm:.1f}mm is less than '
-                        f'2× the minimum tool diameter ({min_tool_mm:.1f}mm).\n\n'
-                        f'Recommended tool: {tool_hint}\n\n'
-                        f'The geometry will still be created, but milling at this scale '
-                        f'requires a very small bit. Continue only if you have the right tool.',
-                        'TextureForge — CNC Scale Warning')
-                    # Don't block — user can proceed
-
             if depth_mm < 0.05:
                 ui.messageBox(
                     f'Emboss Depth {depth_mm:.3f}mm is extremely shallow.\n'
@@ -163,28 +134,17 @@ class TextureExecuteHandler(adsk.core.CommandEventHandler):
 
             texture_name = TEXTURES[texture_key]['name']
             direction    = 'deboss (cut in)' if is_cut else 'boss (raised)'
-            mode_label   = 'CNC milling' if is_cnc else '3D printing'
-
-            cnc_tip = ''
-            if is_cnc:
-                tool_hint, _ = CNC_TOOL_HINTS.get(texture_key, ('small end mill', 3.0))
-                cnc_tip = (
-                    f'\n\nCNC next steps:\n'
-                    f'  • Recommended cutter: {tool_hint}\n'
-                    f'  • Use AutoPath (Manufacturing workspace) to generate toolpaths\n'
-                    f'  • Or set up a Parallel or Scallop toolpath manually over this face'
-                )
+            tool_hint, _ = CNC_TOOL_HINTS.get(texture_key, ('small end mill', 3.0))
 
             ui.messageBox(
                 f'✓ TextureForge — texture applied!\n\n'
                 f'  Texture:  {texture_name}\n'
                 f'  Scale:    {scale_mm:.2f} mm per repeat\n'
                 f'  Depth:    {depth_mm:.3f} mm ({direction})\n'
-                f'  Elements: {n_profiles} emboss profiles\n'
-                f'  Mode:     {mode_label}'
-                f'{cnc_tip}\n\n'
-                f'The sketch "{sketch.name}" is the pattern source.\n'
-                f'Suppress the Emboss in the timeline to remove the texture.',
+                f'  Elements: {n_profiles} profiles\n\n'
+                f'CNC tip: {tool_hint}\n'
+                f'3D print tip: depth should be ≥ 2× your layer height.\n\n'
+                f'The sketch "{sketch.name}" is the pattern source.',
                 'TextureForge')
 
         except RuntimeError as e:
@@ -206,18 +166,10 @@ def on_texture_stamp_created(args):
     inputs.addTextBoxCommandInput(
         'intro', '',
         '<b>TextureForge — Surface Texture Stamp</b><br>'
-        'Select a face, choose a texture pattern, set the output mode, and click OK.<br>'
-        'The pattern is modeled as real geometry — it prints <i>and</i> mills.',
+        'Select a face, choose a texture pattern, and click OK.<br>'
+        'The pattern is modeled as real geometry — works for 3D printing <i>and</i> CNC.',
         4, True
     )
-
-    # Output mode
-    mode_drop = inputs.addDropDownCommandInput(
-        'outputMode', 'Output Mode',
-        adsk.core.DropDownStyles.TextListDropDownStyle
-    )
-    mode_drop.listItems.add('3D Print', True)
-    mode_drop.listItems.add('CNC Mill',  False)
 
     # Face selection
     sel = inputs.addSelectionInput(
@@ -246,12 +198,15 @@ def on_texture_stamp_created(args):
     inputs.addBoolValueInput('textureCut', 'Deboss (cut into surface)', True, '', False)
 
     # Dynamic hint box (updated by inputChanged handler)
+    first_info = TEXTURES[first_key]
+    first_tool, _ = CNC_TOOL_HINTS.get(first_key, ('small end mill', 3.0))
     inputs.addTextBoxCommandInput(
-        'cncHint', '',
-        '<b>3D Print Mode — Carbon Fiber (2×2 Twill)</b><br>'
-        'Recommended depth: ≥ 2× layer height (e.g. 0.4mm for 0.2mm layers).<br>'
-        'Export as STL after stamping — the texture is real geometry.',
-        4, True
+        'patternHint', '',
+        f'<b>{first_info["name"]}</b><br>'
+        f'Default scale: {first_info["default_scale_mm"]}mm | '
+        f'Default depth: {first_info["default_depth_mm"]}mm<br>'
+        f'CNC: {first_tool}',
+        3, True
     )
 
     # Register handlers

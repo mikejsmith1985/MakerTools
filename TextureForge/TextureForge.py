@@ -111,6 +111,20 @@ def run(context):
         _ui  = _app.userInterface
         _log('Fusion app & UI obtained')
 
+        # Force-reload our submodules so toggling the add-in picks up code changes
+        # without requiring a full Fusion restart.
+        import importlib, sys
+        for mod_name in list(sys.modules.keys()):
+            if 'TextureForge' in mod_name or (
+                mod_name in ('core.texture_stamp', 'core.image_to_texture',
+                             'ui.handlers', 'core', 'ui')
+            ):
+                try:
+                    importlib.reload(sys.modules[mod_name])
+                    _log(f'Reloaded module: {mod_name}')
+                except Exception:
+                    pass
+
         # Try several workspace IDs — the exact string varies by Fusion version.
         # We add the panel to ALL design-related workspaces we can find so the
         # user sees it regardless of which sub-mode they're in.

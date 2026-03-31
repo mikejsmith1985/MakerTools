@@ -151,6 +151,11 @@ class SettingsCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
             _ui.messageBox(f'Settings Error:\n{traceback.format_exc()}')
 
 
+def _res(name):
+    """Return absolute path to a resources/<name> subfolder for icon PNGs."""
+    return os.path.join(ADDIN_DIR, 'resources', name)
+
+
 def _create_button(cmd_def_id, label, tooltip, handler_class, resource_folder=''):
     """Create a command definition and attach a handler."""
     cmd_defs = _ui.commandDefinitions
@@ -203,7 +208,8 @@ def run(context):
             CMD_GENERATE_CAM,
             'Generate Toolpaths',
             'Analyze geometry and generate CAM operations with AI-selected tools and feeds/speeds.',
-            GenerateCamCommandCreatedHandler
+            GenerateCamCommandCreatedHandler,
+            _res('GenerateCAM')
         )
         panel.controls.addCommand(gen_cmd)
 
@@ -211,7 +217,8 @@ def run(context):
             CMD_IMPORT_TOOL,
             'Import Tool',
             'Import an endmill/bit from an Amazon URL. AI extracts the specifications automatically.',
-            ImportToolCommandCreatedHandler
+            ImportToolCommandCreatedHandler,
+            _res('ImportTool')
         )
         panel.controls.addCommand(import_cmd)
 
@@ -219,7 +226,8 @@ def run(context):
             CMD_MANAGE_TOOLS,
             'Manage Tools',
             'View and edit your AutoPath tool library.',
-            ManageToolsCommandCreatedHandler
+            ManageToolsCommandCreatedHandler,
+            _res('ManageTools')
         )
         panel.controls.addCommand(manage_cmd)
 
@@ -229,7 +237,8 @@ def run(context):
             CMD_ADD_MATERIAL,
             'Add Material',
             'Add a new material profile using AI-generated feeds and speeds.',
-            AddMaterialCommandCreatedHandler
+            AddMaterialCommandCreatedHandler,
+            _res('AddMaterial')
         )
         panel.controls.addCommand(material_cmd)
 
@@ -237,7 +246,8 @@ def run(context):
             CMD_TWO_SIDED,
             '2-Sided Carve',
             'Set up a 2-sided machining operation with dowel pin alignment.',
-            TwoSidedCommandCreatedHandler
+            TwoSidedCommandCreatedHandler,
+            _res('TwoSided')
         )
         panel.controls.addCommand(two_sided_cmd)
 
@@ -247,7 +257,8 @@ def run(context):
             CMD_SETTINGS,
             'Settings',
             'Configure AutoPath: AI token, machine profile, default preferences.',
-            SettingsCommandCreatedHandler
+            SettingsCommandCreatedHandler,
+            _res('Settings')
         )
         panel.controls.addCommand(settings_cmd)
 

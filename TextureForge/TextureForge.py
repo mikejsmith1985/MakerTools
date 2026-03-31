@@ -73,12 +73,17 @@ class ImageTextureCommandCreatedHandler(adsk.core.CommandCreatedEventHandler):
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
-def _create_button(cmd_def_id, label, tooltip, handler_class):
+def _res(name):
+    """Return absolute path to a resources/<name> subfolder for icon PNGs."""
+    return os.path.join(ADDIN_DIR, 'resources', name)
+
+
+def _create_button(cmd_def_id, label, tooltip, handler_class, resource_folder=''):
     cmd_defs = _ui.commandDefinitions
     existing = cmd_defs.itemById(cmd_def_id)
     if existing:
         existing.deleteMe()
-    cmd_def = cmd_defs.addButtonDefinition(cmd_def_id, label, tooltip)
+    cmd_def = cmd_defs.addButtonDefinition(cmd_def_id, label, tooltip, resource_folder)
     handler = handler_class()
     cmd_def.commandCreated.add(handler)
     _handlers.append(handler)
@@ -120,7 +125,8 @@ def run(context):
                 'Apply a procedural surface texture (carbon fiber, knurl, wood grain, '
                 'brushed metal, leather) to any model face.\n\n'
                 'Works for 3D printing (any scale) and CNC milling (scale ≥ 2× tool dia).',
-                StampTextureCommandCreatedHandler
+                StampTextureCommandCreatedHandler,
+                _res('StampTexture')
             )
             panel.controls.addCommand(stamp_cmd)
 
@@ -130,7 +136,8 @@ def run(context):
                 'Import an SVG, PNG, or BMP file and stamp it as an emboss texture onto any face.\n\n'
                 'SVG: clean vector paths traced directly.\n'
                 'PNG / BMP: pixel-stamp effect — each dark pixel becomes a small raised square.',
-                ImageTextureCommandCreatedHandler
+                ImageTextureCommandCreatedHandler,
+                _res('ImageTexture')
             )
             panel.controls.addCommand(img_cmd)
             added_to.append(ws_id)

@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox, filedialog
 # ── Tool info ────────────────────────────────────────────────────────────────
 TOOL_NAME    = "PathMaker"
 TOOL_FOLDER  = "PathMaker"          # folder name = Fusion add-in name
-TOOL_VERSION = "1.0.0"
+TOOL_VERSION = "1.0.6"
 ADDIN_DIR    = os.path.dirname(os.path.abspath(__file__))
 
 FUSION_ADDIN_PATHS = [

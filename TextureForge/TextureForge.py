@@ -24,9 +24,9 @@ import sys
 import os
 
 # Make submodules importable when Fusion loads this add-in directly
-_dir = os.path.dirname(__file__)
-if _dir not in sys.path:
-    sys.path.insert(0, _dir)
+ADDIN_DIR = os.path.dirname(os.path.abspath(__file__))
+if ADDIN_DIR not in sys.path:
+    sys.path.insert(0, ADDIN_DIR)
 
 _app      = None
 _ui       = None
@@ -92,11 +92,24 @@ def _create_button(cmd_def_id, label, tooltip, handler_class, resource_folder=''
 
 # ─── Add-in entry points ──────────────────────────────────────────────────────
 
+def _log(msg):
+    """Write a startup log line to ADDIN_DIR/textureforge.log for debugging."""
+    try:
+        log_path = os.path.join(ADDIN_DIR, 'textureforge.log')
+        with open(log_path, 'a', encoding='utf-8') as f:
+            import datetime
+            f.write(f'[{datetime.datetime.now().isoformat()}] {msg}\n')
+    except Exception:
+        pass  # Never let logging break the add-in
+
+
 def run(context):
     global _app, _ui
+    _log('run() called')
     try:
         _app = adsk.core.Application.get()
         _ui  = _app.userInterface
+        _log('Fusion app & UI obtained')
 
         # Try several workspace IDs — the exact string varies by Fusion version.
         # We add the panel to ALL design-related workspaces we can find so the
@@ -141,23 +154,26 @@ def run(context):
             )
             panel.controls.addCommand(img_cmd)
             added_to.append(ws_id)
+            _log(f'Panel added to workspace: {ws_id}')
 
         if not added_to:
-            # Couldn't find any design workspace — show a helpful message
-            ws_list = ', '.join(
-                w.id for w in _ui.workspaces
-            ) if _ui else 'unknown'
+            ws_list = ', '.join(w.id for w in _ui.workspaces) if _ui else 'unknown'
+            _log(f'ERROR: No design workspace found. Available: {ws_list}')
             _ui.messageBox(
                 'TextureForge: could not find the Design workspace.\n\n'
                 'Available workspaces:\n' + ws_list + '\n\n'
                 'Please open an issue at github.com/mikejsmith1985/MakerTools '
                 'and paste the workspace IDs above.',
                 'TextureForge — Setup')
+        else:
+            _log(f'run() completed successfully. Added to: {added_to}')
 
     except Exception:
+        tb = traceback.format_exc()
+        _log(f'EXCEPTION in run():\n{tb}')
         if _ui:
             _ui.messageBox(
-                f'TextureForge failed to start:\n{traceback.format_exc()}',
+                f'TextureForge failed to start:\n{tb}',
                 'TextureForge')
 
 

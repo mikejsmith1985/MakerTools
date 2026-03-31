@@ -53,7 +53,16 @@ def install_addin(dest_base):
     dest = os.path.join(dest_base, TOOL_FOLDER)
     if os.path.exists(dest):
         shutil.rmtree(dest)
-    shutil.copytree(ADDIN_DIR, dest, dirs_exist_ok=False)
+    shutil.copytree(
+        ADDIN_DIR, dest,
+        ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo', '*.pyd'),
+        dirs_exist_ok=False,
+    )
+    # Belt-and-suspenders: remove any __pycache__ that slipped through
+    for root, dirs, _ in os.walk(dest):
+        for d in dirs:
+            if d == '__pycache__':
+                shutil.rmtree(os.path.join(root, d))
     return dest
 
 

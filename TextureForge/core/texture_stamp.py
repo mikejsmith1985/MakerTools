@@ -378,8 +378,10 @@ def apply_texture_to_face(face, texture_key, scale_mm, depth_mm, is_cut=False):
     faces_col.add(face)
 
     emboss_feats = component.features.embossFeatures
-    inp = emboss_feats.createInput(profiles_col, faces_col)
-    inp.setExtentToDepth(adsk.core.ValueInput.createByReal(depth_cm))
+    inp = emboss_feats.createInput(
+        profiles_col, faces_col,
+        adsk.core.ValueInput.createByReal(depth_cm)
+    )
     inp.embossFeatureType = (
         adsk.fusion.EmbossFeatureTypes.CutEmbossFeatureType if is_cut
         else adsk.fusion.EmbossFeatureTypes.BossEmbossFeatureType

@@ -826,8 +826,10 @@ def apply_image_texture_to_face(face, filepath, depth_mm, is_cut,
     faces_col.add(face)
 
     emboss_features = rc.features.embossFeatures
-    emboss_input    = emboss_features.createInput(profiles, faces_col)
-    emboss_input.setExtentToDepth(adsk.core.ValueInput.createByReal(depth_cm))
+    emboss_input    = emboss_features.createInput(
+        profiles, faces_col,
+        adsk.core.ValueInput.createByReal(depth_cm)
+    )
     emboss_input.embossFeatureType = (
         adsk.fusion.EmbossFeatureTypes.CutEmbossFeatureType
         if is_cut else

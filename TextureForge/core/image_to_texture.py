@@ -805,11 +805,9 @@ def apply_image_texture_to_face(face, filepath, depth_mm, is_cut,
         )
 
     # ── 5. Collect closed profiles ─────────────────────────────────────────────
-    profiles = adsk.core.ObjectCollection.create()
-    for prof in sketch.profiles:
-        profiles.add(prof)
+    profiles = [prof for prof in sketch.profiles]
 
-    if profiles.count == 0:
+    if len(profiles) == 0:
         sketch.deleteMe()
         raise RuntimeError(
             f'Sketch drawn ({n_drawn} elements) but Fusion found no closed profiles.\n\n'
@@ -822,8 +820,7 @@ def apply_image_texture_to_face(face, filepath, depth_mm, is_cut,
         )
 
     # ── 6. Emboss ──────────────────────────────────────────────────────────────
-    faces_col = adsk.core.ObjectCollection.create()
-    faces_col.add(face)
+    faces_col = [face]
 
     emboss_features = rc.features.embossFeatures
     emboss_input    = emboss_features.createInput(
@@ -837,4 +834,4 @@ def apply_image_texture_to_face(face, filepath, depth_mm, is_cut,
     )
 
     feature = emboss_features.add(emboss_input)
-    return feature, profiles.count, sketch
+    return feature, len(profiles), sketch

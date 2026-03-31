@@ -37,7 +37,7 @@ class TextureInputChangedHandler(adsk.core.InputChangedEventHandler):
 
     def notify(self, args):
         try:
-            from ..core.texture_stamp import TEXTURES
+            from core.texture_stamp import TEXTURES
 
             changed = args.input
             inputs  = args.inputs
@@ -89,8 +89,8 @@ class TextureExecuteHandler(adsk.core.CommandEventHandler):
 
     def notify(self, args):
         try:
-            from ..core import texture_stamp
-            from ..core.texture_stamp import TEXTURES
+            from core import texture_stamp
+            from core.texture_stamp import TEXTURES
 
             app = adsk.core.Application.get()
             ui  = app.userInterface
@@ -196,7 +196,7 @@ class TextureExecuteHandler(adsk.core.CommandEventHandler):
 
 def on_texture_stamp_created(args):
     """Build the TextureForge Stamp Texture dialog."""
-    from ..core.texture_stamp import TEXTURES
+    from core.texture_stamp import TEXTURES
 
     cmd    = args.command
     inputs = cmd.commandInputs
@@ -325,7 +325,7 @@ class ImageTextureExecuteHandler(adsk.core.CommandEventHandler):
     def notify(self, args):
         import os
         try:
-            from ..core.image_to_texture import apply_image_texture_to_face
+            from core.image_to_texture import apply_image_texture_to_face
 
             app = adsk.core.Application.get()
             ui  = app.userInterface
@@ -515,4 +515,5 @@ def on_image_texture_created(args):
     wt_h = _WidthToggleHandler()
     cmd.inputChanged.add(wt_h)
     _handlers.append(wt_h)
+
 

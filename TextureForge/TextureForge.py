@@ -93,41 +93,59 @@ def run(context):
         _app = adsk.core.Application.get()
         _ui  = _app.userInterface
 
-        # TextureForge lives in the Design workspace where Emboss features live
-        design_ws = _ui.workspaces.itemById('FusionSolidEnvironment')
-        if not design_ws:
+        # Try several workspace IDs — the exact string varies by Fusion version.
+        # We add the panel to ALL design-related workspaces we can find so the
+        # user sees it regardless of which sub-mode they're in.
+        DESIGN_WS_IDS = [
+            'FusionSolidEnvironment',   # Design – Solid (most common)
+            'FusionSurfaceEnvironment', # Design – Surface
+        ]
+
+        added_to = []
+        for ws_id in DESIGN_WS_IDS:
+            ws = _ui.workspaces.itemById(ws_id)
+            if not ws:
+                continue
+
+            panels = ws.toolbarPanels
+            existing = panels.itemById(PANEL_ID)
+            if existing:
+                existing.deleteMe()
+
+            panel = panels.add(PANEL_ID, 'TextureForge', '', False)
+
+            stamp_cmd = _create_button(
+                CMD_STAMP,
+                'Stamp Texture',
+                'Apply a procedural surface texture (carbon fiber, knurl, wood grain, '
+                'brushed metal, leather) to any model face.\n\n'
+                'Works for 3D printing (any scale) and CNC milling (scale ≥ 2× tool dia).',
+                StampTextureCommandCreatedHandler
+            )
+            panel.controls.addCommand(stamp_cmd)
+
+            img_cmd = _create_button(
+                CMD_IMAGE_TEXTURE,
+                'Texture From Image',
+                'Import an SVG, PNG, or BMP file and stamp it as an emboss texture onto any face.\n\n'
+                'SVG: clean vector paths traced directly.\n'
+                'PNG / BMP: pixel-stamp effect — each dark pixel becomes a small raised square.',
+                ImageTextureCommandCreatedHandler
+            )
+            panel.controls.addCommand(img_cmd)
+            added_to.append(ws_id)
+
+        if not added_to:
+            # Couldn't find any design workspace — show a helpful message
+            ws_list = ', '.join(
+                w.id for w in _ui.workspaces
+            ) if _ui else 'unknown'
             _ui.messageBox(
-                'TextureForge requires the Design workspace.\n'
-                'Please switch to Design (Solid environment).',
-                'TextureForge')
-            return
-
-        panels = design_ws.toolbarPanels
-        existing = panels.itemById(PANEL_ID)
-        if existing:
-            existing.deleteMe()
-
-        panel = panels.add(PANEL_ID, 'TextureForge', '', False)
-
-        stamp_cmd = _create_button(
-            CMD_STAMP,
-            'Stamp Texture',
-            'Apply a procedural surface texture (carbon fiber, knurl, wood grain, '
-            'brushed metal, leather) to any model face.\n\n'
-            'Works for 3D printing (any scale) and CNC milling (scale ≥ 2× tool dia).',
-            StampTextureCommandCreatedHandler
-        )
-        panel.controls.addCommand(stamp_cmd)
-
-        img_cmd = _create_button(
-            CMD_IMAGE_TEXTURE,
-            'Texture From Image',
-            'Import an SVG, PNG, or BMP file and stamp it as an emboss texture onto any face.\n\n'
-            'SVG: clean vector paths traced directly.\n'
-            'PNG / BMP: pixel-stamp effect — each dark pixel becomes a small raised square.',
-            ImageTextureCommandCreatedHandler
-        )
-        panel.controls.addCommand(img_cmd)
+                'TextureForge: could not find the Design workspace.\n\n'
+                'Available workspaces:\n' + ws_list + '\n\n'
+                'Please open an issue at github.com/mikejsmith1985/MakerTools '
+                'and paste the workspace IDs above.',
+                'TextureForge — Setup')
 
     except Exception:
         if _ui:
@@ -140,19 +158,17 @@ def stop(context):
     global _ui
     try:
         if _ui:
-            design_ws = _ui.workspaces.itemById('FusionSolidEnvironment')
-            if design_ws:
-                rf_panel = design_ws.toolbarPanels.itemById(PANEL_ID)
-                if rf_panel:
-                    rf_panel.deleteMe()
+            for ws_id in ('FusionSolidEnvironment', 'FusionSurfaceEnvironment'):
+                ws = _ui.workspaces.itemById(ws_id)
+                if ws:
+                    panel = ws.toolbarPanels.itemById(PANEL_ID)
+                    if panel:
+                        panel.deleteMe()
 
-            cmd_def = _ui.commandDefinitions.itemById(CMD_STAMP)
-            if cmd_def:
-                cmd_def.deleteMe()
-
-            cmd_def = _ui.commandDefinitions.itemById(CMD_IMAGE_TEXTURE)
-            if cmd_def:
-                cmd_def.deleteMe()
+            for cmd_id in (CMD_STAMP, CMD_IMAGE_TEXTURE):
+                cmd_def = _ui.commandDefinitions.itemById(cmd_id)
+                if cmd_def:
+                    cmd_def.deleteMe()
 
         _handlers.clear()
 

@@ -472,65 +472,17 @@ def apply_texture_to_face(face, texture_key, scale_mm, depth_mm, is_cut=False):
             'Try a larger Pattern Scale.')
 
     # ── Step 4: apply Emboss feature ─────────────────────────────────────────
-    # Positive depth = boss (raises), negative depth = deboss (cuts in).
+    # Positive depth = boss (raises out of surface).
+    # Negative depth = deboss (cuts into surface).
     signed_depth_cm = -depth_cm if is_cut else depth_cm
     depth_vi = adsk.core.ValueInput.createByReal(signed_depth_cm)
 
-    _debug_log(f'apply_texture_to_face: texture={texture_key} depth_cm={signed_depth_cm:.4f} '
-               f'n_profiles={n_profiles} is_cut={is_cut}')
-
-    emboss_feats = component.features.embossFeatures
-
-    # Build all argument variants we want to try for createInput().
-    # The C++ SWIG binding rejects certain Python types depending on Fusion
-    # version; try them all in order until one succeeds.
     profiles_list = [sketch.profiles.item(i) for i in range(n_profiles)]
-    profiles_oc   = adsk.core.ObjectCollection.create()
-    for p in profiles_list:
-        profiles_oc.add(p)
-
-    faces_list = [face]
-    faces_oc   = adsk.core.ObjectCollection.create()
-    faces_oc.add(face)
-
-    _ATTEMPTS = [
-        # Most likely to work first
-        ('single+single',  sketch.profiles.item(0), face),
-        ('list+list',      profiles_list,            faces_list),
-        ('OC+OC',          profiles_oc,              faces_oc),
-        ('list+OC',        profiles_list,            faces_oc),
-        ('OC+list',        profiles_oc,              faces_list),
-        ('single+list',    sketch.profiles.item(0),  faces_list),
-        ('single+OC',      sketch.profiles.item(0),  faces_oc),
-    ]
-
-    inp      = None
-    used_lbl = None
-    for label, p_arg, f_arg in _ATTEMPTS:
-        try:
-            inp = emboss_feats.createInput(p_arg, f_arg, depth_vi)
-            if inp is not None:
-                used_lbl = label
-                _debug_log(f'createInput succeeded with: {label}')
-                break
-        except Exception as e:
-            _debug_log(f'createInput failed ({label}): {type(e).__name__}: {e}')
-
+    emboss_feats  = component.features.embossFeatures
+    inp = emboss_feats.createInput(profiles_list, [face], depth_vi)
     if inp is None:
         sketch.deleteMe()
-        raise RuntimeError(
-            'EmbossFeatures.createInput() failed with all known argument types.\n'
-            'Check textureforge.log next to the add-in for details.\n'
-            'This may be a Fusion API compatibility issue.')
-
-    # If we used a single-profile call, set all profiles via the property setter
-    if used_lbl and used_lbl.startswith('single') and n_profiles > 1:
-        try:
-            inp.profiles = profiles_list
-            _debug_log(f'Set {n_profiles} profiles via property setter')
-        except Exception as e:
-            _debug_log(f'Property setter for profiles failed: {e}')
+        raise RuntimeError('EmbossFeatures.createInput() returned None — the face or profiles may be invalid.')
 
     feature = emboss_feats.add(inp)
-    _debug_log(f'emboss_feats.add() returned: {feature}')
     return feature, n_profiles, sketch

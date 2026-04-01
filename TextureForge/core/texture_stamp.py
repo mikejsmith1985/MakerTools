@@ -65,8 +65,10 @@ TEXTURES = {
     },
 }
 
-# Safety cap: limits number of sketch profiles to avoid Fusion 360 slowdown
-MAX_PROFILES = 300
+# Safety cap: limits number of sketch profiles to avoid Fusion 360 slowdown.
+# At 2.5 mm scale a 100×100 mm face needs ~1 600 tiles; 2 000 covers most
+# practical face sizes while keeping Emboss creation time reasonable (< ~10 s).
+MAX_PROFILES = 2000
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

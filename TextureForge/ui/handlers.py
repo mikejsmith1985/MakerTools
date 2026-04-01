@@ -136,6 +136,14 @@ class TextureExecuteHandler(adsk.core.CommandEventHandler):
             direction    = 'deboss (cut in)' if is_cut else 'boss (raised)'
             tool_hint, _ = CNC_TOOL_HINTS.get(texture_key, ('small end mill', 3.0))
 
+            truncation_note = ''
+            if n_profiles >= texture_stamp.MAX_PROFILES:
+                truncation_note = (
+                    f'\n\n⚠ Pattern was capped at {texture_stamp.MAX_PROFILES} elements '
+                    f'— the face may be larger than the scale can cover.\n'
+                    f'Increase Pattern Scale (try {scale_mm * 1.5:.1f}mm+) for full coverage.'
+                )
+
             ui.messageBox(
                 f'✓ TextureForge — texture applied!\n\n'
                 f'  Texture:  {texture_name}\n'
@@ -143,7 +151,8 @@ class TextureExecuteHandler(adsk.core.CommandEventHandler):
                 f'  Depth:    {depth_mm:.3f} mm ({direction})\n'
                 f'  Elements: {n_profiles} profiles\n\n'
                 f'CNC tip: {tool_hint}\n'
-                f'3D print tip: depth should be ≥ 2× your layer height.\n\n'
+                f'3D print tip: depth should be ≥ 2× your layer height.'
+                f'{truncation_note}\n\n'
                 f'The sketch "{sketch.name}" is the pattern source.',
                 'TextureForge')
 

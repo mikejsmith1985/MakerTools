@@ -85,16 +85,23 @@ if ($LASTEXITCODE -ne 0) { Write-Error "gh release create failed"; exit 1 }
 Write-Host "      ✅  Release created." -ForegroundColor Green
 
 # ── Step 5: Build zip assets ──────────────────────────────────────────────────
+# Uses robocopy to stage a clean copy (no __pycache__, no credentials, no dev
+# files) and then .NET ZipFile for reliable zip creation.  Compress-Archive is
+# NOT used because it includes long __pycache__ paths that break Windows Explorer
+# extraction and includes data/user_settings.json which may contain credentials.
 Write-Host "`n[4/6] Building zip assets..." -ForegroundColor Cyan
 
-$repoRoot   = $PSScriptRoot
+$repoRoot   = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
 $stagingDir = Join-Path $env:TEMP "MakerTools-release-$Version"
 Remove-Item $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
 New-Item    $stagingDir -ItemType Directory | Out-Null
 
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+
 $zipPaths = @()
 foreach ($toolName in @("PathMaker", "TextureForge", "MisterWizard")) {
     $toolSource = Join-Path $repoRoot $toolName
+    $toolStage  = Join-Path $stagingDir $toolName   # folder is named $toolName so zip root is $toolName/
     $zipDest    = Join-Path $stagingDir "$toolName-$Version.zip"
 
     if (-not (Test-Path $toolSource)) {
@@ -102,8 +109,39 @@ foreach ($toolName in @("PathMaker", "TextureForge", "MisterWizard")) {
         continue
     }
 
-    Compress-Archive -Path $toolSource -DestinationPath $zipDest -CompressionLevel Optimal
-    $sizeKb = [math]::Round((Get-Item $zipDest).Length / 1KB, 1)
+    # Stage a clean copy: exclude compiled bytecode, dev/test dirs, runtime data,
+    # and any credential files that should never ship in a distribution zip.
+    New-Item $toolStage -ItemType Directory | Out-Null
+    robocopy $toolSource $toolStage /E `
+        /XD "__pycache__" "tests" ".git" `
+        /XF "*.pyc" "*.pyo" "*.pyd" ".gitkeep" "user_settings.json" `
+        /NFL /NDL /NJH /NJS | Out-Null
+
+    # robocopy exit codes 0-7 are informational (0=nothing to copy, 1=ok, etc.)
+    # 8+ means a real error.
+    if ($LASTEXITCODE -ge 8) {
+        Write-Error "robocopy failed for $toolName (exit $LASTEXITCODE)"
+        exit 1
+    }
+
+    # Create zip using .NET ZipFile — more reliable than Compress-Archive.
+    # $true = includeBaseDirectory so the zip contains $toolName/ at its root.
+    [System.IO.Compression.ZipFile]::CreateFromDirectory(
+        $toolStage,
+        $zipDest,
+        [System.IO.Compression.CompressionLevel]::Optimal,
+        $true
+    )
+
+    # Sanity-check: refuse to upload a zip that is suspiciously small.
+    $zipSizeBytes = (Get-Item $zipDest).Length
+    $minAcceptableBytes = 10240  # 10 KB — any real tool zip will be larger
+    if ($zipSizeBytes -lt $minAcceptableBytes) {
+        Write-Error "$toolName-$Version.zip is only $zipSizeBytes bytes — aborting before upload"
+        exit 1
+    }
+
+    $sizeKb = [math]::Round($zipSizeBytes / 1KB, 1)
     Write-Host "      $toolName-$Version.zip  ($sizeKb KB)" -ForegroundColor Green
     $zipPaths += $zipDest
 }

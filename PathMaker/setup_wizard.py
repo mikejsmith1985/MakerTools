@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox, filedialog
 # ── Tool info ────────────────────────────────────────────────────────────────
 TOOL_NAME    = "PathMaker"
 TOOL_FOLDER  = "PathMaker"          # folder name = Fusion add-in name
-TOOL_VERSION = "1.0.6"
+TOOL_VERSION = "1.0.7"
 ADDIN_DIR    = os.path.dirname(os.path.abspath(__file__))
 
 FUSION_ADDIN_PATHS = [
@@ -36,10 +36,14 @@ CARD_BG = "#313244"
 
 STEPS = [
     "Welcome",
-    "Check Your Computer",
-    "Find Fusion 360",
-    "Install PathMaker",
-    "First Steps",
+    "Check",
+    "Find Fusion",
+    "Install",
+    "Enable",
+    "API Token",
+    "Add Tools",
+    "Toolpaths",
+    "All Done!",
 ]
 
 
@@ -81,7 +85,7 @@ class SetupWizard(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title(f"🔧 {TOOL_NAME} Setup Wizard  v{TOOL_VERSION}")
-        self.geometry("680x520")
+        self.geometry("820x560")
         self.resizable(False, False)
         self.configure(bg=BG)
 
@@ -162,12 +166,12 @@ class SetupWizard(tk.Tk):
 
     def _h(self, parent, text, color=ACCENT):
         tk.Label(parent, text=text, bg=CARD_BG, fg=color,
-                 font=("Segoe UI", 12, "bold"), wraplength=580,
+                 font=("Segoe UI", 12, "bold"), wraplength=720,
                  justify="left").pack(anchor="w")
 
     def _p(self, parent, text, color=FG):
         tk.Label(parent, text=text, bg=CARD_BG, fg=color,
-                 font=("Segoe UI", 10), wraplength=580,
+                 font=("Segoe UI", 10), wraplength=720,
                  justify="left").pack(anchor="w", pady=2)
 
     # ── Steps ──────────────────────────────────────────────────────────────
@@ -175,11 +179,11 @@ class SetupWizard(tk.Tk):
     def _show_step(self):
         self._clear_content()
         self._update_progress()
-        [self._step0, self._step1, self._step2,
-         self._step3, self._step4][self.step]()
+        [self._step0, self._step1, self._step2, self._step3,
+         self._step4, self._step5, self._step6, self._step7, self._step8][self.step]()
         self._back_btn.config(state="normal" if self.step > 0 else "disabled")
         last = self.step == len(STEPS) - 1
-        self._next_btn.config(text="Close" if last else "Next →")
+        self._next_btn.config(text="Finish ✓" if last else "Next →")
 
     def _step0(self):
         c = self._card()
@@ -265,23 +269,125 @@ class SetupWizard(tk.Tk):
             self._next_btn.config(state="disabled")
 
     def _step4(self):
+        """Step 4: Walk the user through enabling the add-in inside Fusion 360."""
         c = self._card()
-        self._h(c, "🎉  All Done!  PathMaker is Installed.")
-        self._p(c, "Here's how to turn it on in Fusion 360:", YELLOW)
+        self._h(c, "🔌  Enable PathMaker Inside Fusion 360")
+        self._p(c, "PathMaker is installed — now you need to turn it on. Follow these steps:", YELLOW)
 
-        for i, step in enumerate([
-            "Open Fusion 360",
-            "Click the top menu: Tools → Add-Ins",
-            "Click the 'Add-Ins' tab",
-            "Find 'PathMaker' in the list",
-            "Click the toggle to turn it ON  ✅",
-            "Switch to the Manufacturing workspace — PathMaker is in the toolbar!",
+        for stepNumber, instruction in enumerate([
+            "Open Fusion 360  (use the button below if it's not open yet)",
+            "Click the top menu:  Tools → Add-Ins  (or press  Shift + S)",
+            "Click the  'Add-Ins'  tab  (not 'Scripts')",
+            "Find  PathMaker  in the list",
+            "Click the  toggle slider  to turn it  ON  ✅",
+            "Check the box  'Run on Startup'  so it loads every time automatically",
+            "Switch to the  Manufacturing  workspace — the PathMaker toolbar will be there!",
         ], 1):
-            self._p(c, f"  Step {i}:  {step}")
+            self._p(c, f"  {stepNumber}.  {instruction}")
 
-        self._p(c, "\n🔑  First thing to do in PathMaker:", YELLOW)
-        self._p(c, "  Click 'Settings' → paste your GitHub Models API token.")
-        self._p(c, "  Get a free token at: github.com/marketplace/models")
+        tk.Button(self._content_frame, text="Open Fusion 360 →",
+                  bg=ACCENT, fg=BG, font=("Segoe UI", 10, "bold"),
+                  relief="flat", padx=10, pady=5,
+                  command=self._open_fusion).pack(anchor="w", pady=(8, 0))
+
+    def _step5(self):
+        """Step 5: Guide the user to get their free GitHub Models AI token."""
+        c = self._card()
+        self._h(c, "🔑  Get Your Free AI Token  (takes ~2 minutes)")
+        self._p(c, "PathMaker uses GitHub's free AI to read Amazon tool listings and suggest feeds & speeds.")
+        self._p(c, "You need a free GitHub account and a Personal Access Token with the 'models' scope.", YELLOW)
+
+        self._p(c, "\nSteps to get your token:")
+        for stepNumber, instruction in enumerate([
+            "Go to:  github.com/marketplace/models  (button below)",
+            "Sign in, or create a free GitHub account",
+            "Click your profile picture  →  Settings",
+            "Go to  Developer Settings  →  Personal Access Tokens  →  Fine-grained tokens",
+            "Click  'Generate new token' — give it any name",
+            "Under  'Permissions', enable the  models  scope  (read-only is enough)",
+            "Click  Generate — copy the token that starts with  github_pat_",
+            "In Fusion 360:  PathMaker toolbar  →  Settings  →  paste your token  →  Save",
+        ], 1):
+            self._p(c, f"  {stepNumber}.  {instruction}")
+
+        self._p(c, "\n💡  Tip: tokens expire — if AI stops working, generate a new one here.", FG)
+
+        tk.Button(self._content_frame, text="Open github.com/marketplace/models →",
+                  bg=ACCENT, fg=BG, font=("Segoe UI", 10, "bold"),
+                  relief="flat", padx=10, pady=5,
+                  command=lambda: self._open_url("https://github.com/marketplace/models")).pack(anchor="w", pady=(8, 0))
+
+    def _step6(self):
+        """Step 6: Show the user how to add their CNC tools from Amazon links."""
+        c = self._card()
+        self._h(c, "🔧  Add Your CNC Tools  (from Amazon)")
+        self._p(c, "PathMaker builds your tool library from Amazon product links — no manual spec entry needed!")
+
+        self._p(c, "\nHow to add a tool:")
+        for stepNumber, instruction in enumerate([
+            "Find any endmill or router bit on  Amazon  (one you own or plan to buy)",
+            "Copy the  product URL  from your browser's address bar",
+            "In Fusion 360:  Manufacturing workspace  →  PathMaker toolbar",
+            "Click  Import Tool",
+            "Paste the URL  and click  OK",
+            "PathMaker reads the Amazon listing and saves the tool specs automatically ✅",
+        ], 1):
+            self._p(c, f"  {stepNumber}.  {instruction}")
+
+        self._p(c, "\n💡  Do this for every bit you own.", YELLOW)
+        self._p(c, "     The more tools you add, the smarter PathMaker gets at choosing the right one.", FG)
+
+        c2 = self._card()
+        self._h(c2, "📋  Manage Your Tools")
+        self._p(c2, "Click  Manage Tools  in the toolbar to view, edit, or delete any saved tool.")
+
+    def _step7(self):
+        """Step 7: Explain how to add a material and generate toolpaths."""
+        c = self._card()
+        self._h(c, "⚡  Generate Your First Toolpath")
+        self._p(c, "Once you have tools in your library, you're ready to let PathMaker do the CAM work.", YELLOW)
+
+        self._p(c, "\nAdd a material (first time only):")
+        for stepNumber, instruction in enumerate([
+            "Click  Add Material  in the PathMaker toolbar",
+            "Type the material name  (e.g. '1/4 inch Baltic Birch Plywood'  or  'Aluminum 6061')",
+            "PathMaker uses AI to generate feeds & speeds and saves them — done!",
+        ], 1):
+            self._p(c, f"  {stepNumber}.  {instruction}")
+
+        self._p(c, "\nGenerate toolpaths:")
+        for stepNumber, instruction in enumerate([
+            "Open your 3D model in Fusion 360's  Manufacturing  workspace",
+            "Create a  CAM Setup  (set stock size and WCS zero point — normal Fusion step)",
+            "Click  Generate Toolpaths  in the PathMaker toolbar",
+            "Select your material from the dropdown",
+            "Click  OK  — PathMaker analyzes the geometry and builds operations automatically",
+            "Run the  Fusion simulation  to verify, then  post-process  as usual",
+        ], 1):
+            self._p(c, f"  {stepNumber}.  {instruction}")
+
+        self._p(c, "\n💡  For 2-sided carving, use the  2-Sided Carve  button — it guides dowel pin placement.", FG)
+
+    def _step8(self):
+        """Step 8: Final summary screen with the full toolbar reference."""
+        c = self._card()
+        self._h(c, "🎉  You're Ready to Machine!")
+        self._p(c, "PathMaker is installed, enabled, and set up. Here's a quick reference:", GREEN)
+
+        toolbar_rows = [
+            ("Generate Toolpaths", "Analyzes your model and creates all CAM operations"),
+            ("Import Tool",        "Paste an Amazon URL → tool specs saved automatically"),
+            ("Manage Tools",       "View, edit, or delete tools in your library"),
+            ("Add Material",       "AI generates feeds & speeds for any material"),
+            ("2-Sided Carve",      "Guided flip operation with dowel pin alignment"),
+            ("Settings",           "API token, machine profile, default preferences"),
+        ]
+        for buttonName, description in toolbar_rows:
+            self._p(c, f"  {'▸':>2}  {buttonName:<22}  {description}")
+
+        self._p(c, "\n⚙  Your machine is pre-configured for:", FG)
+        self._p(c, "     Onefinity Machinist  •  Makita RT0701C  •  9,600–30,000 RPM", YELLOW)
+        self._p(c, "     Change this any time under  Settings  in the PathMaker toolbar.", FG)
 
         tk.Button(self._content_frame, text="Open Fusion 360 Now →",
                   bg=GREEN, fg=BG, font=("Segoe UI", 11, "bold"),
@@ -297,6 +403,15 @@ class SetupWizard(tk.Tk):
         except Exception:
             messagebox.showinfo("Open Fusion 360",
                                 "Please open Fusion 360 manually from your Start Menu / Applications.")
+
+    def _open_url(self, url):
+        """Open a URL in the user's default web browser."""
+        try:
+            import webbrowser
+            webbrowser.open(url)
+        except Exception:
+            messagebox.showinfo("Open Browser",
+                                f"Please visit this URL in your browser:\n{url}")
 
     # ── Navigation ─────────────────────────────────────────────────────────
 

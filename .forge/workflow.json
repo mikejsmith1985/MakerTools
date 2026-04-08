@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "projectName": "MakerTools",
+  "projectType": "",
+  "qualityMode": "fast",
+  "enabledModules": ["copilot-instructions", "code-quality", "testing-standards", "documentation", "workflow-enforcer"],
+  "tutorSettings": {
+    "autoNotify": false,
+    "defaultDepth": "brief",
+    "auditNaming": true,
+    "auditComments": false
+  },
+  "prReviewSettings": {
+    "strategy": "manual",
+    "autoTrigger": false,
+    "requireChangelog": false,
+    "agentStrictness": "lenient",
+    "agentFocusAreas": ["naming", "complexity"]
+  },
+  "appliedAt": "2026-04-08"
+}

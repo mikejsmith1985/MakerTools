@@ -9,6 +9,7 @@ No command-line knowledge needed. Just click Next!
 
 import sys
 import os
+import json
 import shutil
 import subprocess
 import tkinter as tk
@@ -86,7 +87,7 @@ class SetupWizard(tk.Tk):
         super().__init__()
         self.title(f"🔧 {TOOL_NAME} Setup Wizard  v{TOOL_VERSION}")
         self.geometry("820x560")
-        self.resizable(False, False)
+        self.resizable(False, True)   # allow vertical resize so nothing is ever clipped
         self.configure(bg=BG)
 
         self.step       = 0
@@ -99,10 +100,46 @@ class SetupWizard(tk.Tk):
 
         self._build_header()
         self._build_progress()
-        self._content_frame = tk.Frame(self, bg=BG)
-        self._content_frame.pack(fill="both", expand=True, padx=24, pady=8)
+        self._build_scrollable_content()
         self._build_nav()
         self._show_step()
+
+    def _build_scrollable_content(self):
+        """Build the main content area as a scrollable canvas so no step is ever clipped."""
+        container = tk.Frame(self, bg=BG)
+        container.pack(fill="both", expand=True, padx=24, pady=8)
+
+        self._scroll_canvas = tk.Canvas(container, bg=BG, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=self._scroll_canvas.yview)
+
+        self._content_frame = tk.Frame(self._scroll_canvas, bg=BG)
+        self._scroll_frame_id = self._scroll_canvas.create_window(
+            (0, 0), window=self._content_frame, anchor="nw"
+        )
+
+        self._scroll_canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Keep inner frame width flush with the canvas as the window resizes
+        self._scroll_canvas.bind(
+            "<Configure>",
+            lambda e: self._scroll_canvas.itemconfig(self._scroll_frame_id, width=e.width)
+        )
+        # Recompute scroll region whenever content is added or removed
+        self._content_frame.bind(
+            "<Configure>",
+            lambda e: self._scroll_canvas.configure(
+                scrollregion=self._scroll_canvas.bbox("all")
+            )
+        )
+
+        self.bind_all("<MouseWheel>", self._on_mousewheel)
+
+        scrollbar.pack(side="right", fill="y")
+        self._scroll_canvas.pack(side="left", fill="both", expand=True)
+
+    def _on_mousewheel(self, event):
+        """Scroll the content canvas with the mouse wheel."""
+        self._scroll_canvas.yview_scroll(-1 * (event.delta // 120), "units")
 
     # ── Layout helpers ─────────────────────────────────────────────────────
 
@@ -156,6 +193,7 @@ class SetupWizard(tk.Tk):
     def _clear_content(self):
         for w in self._content_frame.winfo_children():
             w.destroy()
+        self._scroll_canvas.yview_moveto(0)  # always start each step at the top
 
     def _card(self, parent=None):
         if parent is None:
@@ -291,31 +329,95 @@ class SetupWizard(tk.Tk):
                   command=self._open_fusion).pack(anchor="w", pady=(8, 0))
 
     def _step5(self):
-        """Step 5: Guide the user to get their free GitHub Models AI token."""
-        c = self._card()
-        self._h(c, "🔑  Get Your Free AI Token  (takes ~2 minutes)")
-        self._p(c, "PathMaker uses GitHub's free AI to read Amazon tool listings and suggest feeds & speeds.")
-        self._p(c, "You need a free GitHub account and a Personal Access Token with the 'models' scope.", YELLOW)
+        """Step 5: Configure the AI token.
 
-        self._p(c, "\nSteps to get your token:")
-        for stepNumber, instruction in enumerate([
-            "Go to:  github.com/marketplace/models  (button below)",
-            "Sign in, or create a free GitHub account",
-            "Click your profile picture  →  Settings",
-            "Go to  Developer Settings  →  Personal Access Tokens  →  Fine-grained tokens",
-            "Click  'Generate new token' — give it any name",
-            "Under  'Permissions', enable the  models  scope  (read-only is enough)",
-            "Click  Generate — copy the token that starts with  github_pat_",
-            "In Fusion 360:  PathMaker toolbar  →  Settings  →  paste your token  →  Save",
-        ], 1):
-            self._p(c, f"  {stepNumber}.  {instruction}")
+        If GITHUB_AI_TOKEN is already in the environment (injected by Forge Vault),
+        we write it straight into PathMaker's settings file and skip all manual steps.
+        Otherwise we walk the user through getting a free token from GitHub.
+        """
+        detectedToken = os.environ.get('GITHUB_AI_TOKEN', '').strip()
 
-        self._p(c, "\n💡  Tip: tokens expire — if AI stops working, generate a new one here.", FG)
+        if detectedToken:
+            c = self._card()
+            self._h(c, "🔑  AI Token — Detected Automatically ✅")
+            self._p(c, "Your GITHUB_AI_TOKEN was found in Forge Vault.", GREEN)
+            self._p(c, "PathMaker will use it — no manual setup needed.", FG)
 
-        tk.Button(self._content_frame, text="Open github.com/marketplace/models →",
-                  bg=ACCENT, fg=BG, font=("Segoe UI", 10, "bold"),
-                  relief="flat", padx=10, pady=5,
-                  command=lambda: self._open_url("https://github.com/marketplace/models")).pack(anchor="w", pady=(8, 0))
+            wasWritten = self._write_token_to_settings(detectedToken)
+            if wasWritten:
+                self._p(c, "\n✅  Token saved to PathMaker's settings.", GREEN)
+                self._p(c, "     You can skip the 'Settings → paste token' step inside Fusion 360.", FG)
+            else:
+                self._p(c, "\n⚠️   Token detected but not yet saved — PathMaker isn't installed to a path yet.", YELLOW)
+                self._p(c, "     Go Back and confirm the Fusion 360 folder, then return here.", FG)
+        else:
+            # No vault token found — show the manual walkthrough
+            c = self._card()
+            self._h(c, "🔑  Get Your Free AI Token  (takes ~2 minutes)")
+            self._p(c, "PathMaker uses GitHub's free AI to read Amazon tool listings and suggest feeds & speeds.")
+            self._p(c, "You need a free GitHub account and a Personal Access Token with the 'models' scope.", YELLOW)
+
+            self._p(c, "\nSteps to get your token:")
+            for stepNumber, instruction in enumerate([
+                "Go to:  github.com/marketplace/models  (button below)",
+                "Sign in, or create a free GitHub account",
+                "Click your profile picture  →  Settings",
+                "Go to  Developer Settings  →  Personal Access Tokens  →  Fine-grained tokens",
+                "Click  'Generate new token' — give it any name",
+                "Under  'Permissions', enable the  models  scope  (read-only is enough)",
+                "Click  Generate — copy the token that starts with  github_pat_",
+                "In Fusion 360:  PathMaker toolbar  →  Settings  →  paste your token  →  Save",
+            ], 1):
+                self._p(c, f"  {stepNumber}.  {instruction}")
+
+            self._p(c, "\n💡  Tip: tokens expire — if AI stops working, generate a new one here.", FG)
+
+            tk.Button(self._content_frame, text="Open github.com/marketplace/models →",
+                      bg=ACCENT, fg=BG, font=("Segoe UI", 10, "bold"),
+                      relief="flat", padx=10, pady=5,
+                      command=lambda: self._open_url("https://github.com/marketplace/models")).pack(anchor="w", pady=(8, 0))
+
+    def _write_token_to_settings(self, token):
+        """Write the AI token into PathMaker's settings file at the installed location.
+
+        Creates the data directory and settings file if they don't exist yet,
+        mirroring what PathMaker's _ensure_data_dir() does at add-in startup.
+        Returns True on success, False if the install path is not set or write fails.
+        """
+        fusionPath = self.fusion_path.get().strip()
+        if not fusionPath:
+            return False
+
+        settingsDir  = os.path.join(fusionPath, 'PathMaker', 'data')
+        settingsPath = os.path.join(settingsDir, 'user_settings.json')
+
+        try:
+            os.makedirs(settingsDir, exist_ok=True)
+
+            # Load existing settings so we don't wipe any other saved preferences
+            if os.path.exists(settingsPath):
+                with open(settingsPath, 'r', encoding='utf-8') as settingsFile:
+                    settings = json.load(settingsFile)
+            else:
+                settings = {
+                    'ai_token':           '',
+                    'ai_token_validated': False,
+                    'default_material':   'aluminum_6061_t6',
+                    'default_quality':    'standard',
+                    'two_sided_method':   'dowel_pins',
+                    'show_review_dialog': True,
+                    'first_run_complete': False,
+                }
+
+            settings['ai_token']           = token
+            settings['ai_token_validated'] = False  # PathMaker validates on first use
+
+            with open(settingsPath, 'w', encoding='utf-8') as settingsFile:
+                json.dump(settings, settingsFile, indent=2)
+
+            return True
+        except Exception:
+            return False
 
     def _step6(self):
         """Step 6: Show the user how to add their CNC tools from Amazon links."""

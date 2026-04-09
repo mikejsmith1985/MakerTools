@@ -175,14 +175,14 @@ def _create_setup(cam, stock_config, machine):
         model_collection.add(bodies.item(i))
     setup_input.models = model_collection
 
-    # Configure stock
+    # Configure stock mode on the input before creating the setup
     stock_mode = stock_config.get('mode', 'relative_offset')
 
     if stock_mode == 'fixed_size':
-        # User-specified stock dimensions
+        # User specified physical stock dimensions (e.g., a purchased piece of material)
         setup_input.stockMode = adsk.cam.SetupStockModes.FixedBoxStock
     else:
-        # Relative offset from model bounding box (default)
+        # Default: add a uniform offset around the model bounding box
         setup_input.stockMode = adsk.cam.SetupStockModes.RelativeBoxStock
 
         offset_mm = stock_config.get('offset_mm', 2.0)
@@ -195,6 +195,26 @@ def _create_setup(cam, stock_config, machine):
     # Create the setup
     setup = setups.add(setup_input)
     setup.name = f'FusionCam - {stock_config.get("material_name", "Setup")}'
+
+    # For fixed-size stock, apply the physical dimensions via the CAM parameters API.
+    # We do this after creation because Fusion sets stock parameters on the setup object,
+    # not on the setup input.
+    if stock_mode == 'fixed_size':
+        width_cm  = stock_config.get('width_mm',  100.0) / 10.0
+        height_cm = stock_config.get('height_mm', 100.0) / 10.0
+        depth_cm  = stock_config.get('depth_mm',   10.0) / 10.0
+
+        for paramName, valueCm in [
+            ('job_stocksizex', width_cm),
+            ('job_stocksizey', height_cm),
+            ('job_stocksizez', depth_cm),
+        ]:
+            try:
+                param = setup.parameters.itemByName(paramName)
+                if param:
+                    param.expression = f'{valueCm} cm'
+            except Exception:
+                pass  # Parameter names can vary across Fusion versions — fail gracefully
 
     return setup
 

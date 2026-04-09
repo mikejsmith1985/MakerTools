@@ -18,7 +18,7 @@ from tkinter import ttk, messagebox, filedialog
 # ── Tool info ────────────────────────────────────────────────────────────────
 TOOL_NAME    = "PathMaker"
 TOOL_FOLDER  = "PathMaker"          # folder name = Fusion add-in name
-TOOL_VERSION = "1.0.7"
+TOOL_VERSION = "1.0.8"
 ADDIN_DIR    = os.path.dirname(os.path.abspath(__file__))
 
 FUSION_ADDIN_PATHS = [
@@ -328,6 +328,71 @@ class SetupWizard(tk.Tk):
                   relief="flat", padx=10, pady=5,
                   command=self._open_fusion).pack(anchor="w", pady=(8, 0))
 
+    def _detect_ai_token(self):
+        """Detect the GITHUB_AI_TOKEN from environment or Forge Vault.
+
+        Uses two strategies in order:
+        1. Read the env var directly — works when the wizard is launched from Forge Terminal
+           because Forge auto-injects vault secrets into every PTY session.
+        2. Query the Forge Vault HTTP API — works when the wizard is run directly (e.g.,
+           double-click) by requesting a short-lived injection script and sourcing it.
+
+        Returns the token string, or empty string if not found.
+        """
+        import urllib.request
+        import urllib.error
+
+        # Fast path: Forge Terminal auto-injects GITHUB_AI_TOKEN into its PTY sessions
+        envToken = os.environ.get('GITHUB_AI_TOKEN', '').strip()
+        if envToken:
+            return envToken
+
+        # Fallback: query the local Forge Vault API (only available when fterm is running)
+        vaultBaseUrl = 'http://localhost:3005/api/vault'
+        try:
+            # Step 1: Find the vault entry ID for GITHUB_AI_TOKEN
+            with urllib.request.urlopen(f'{vaultBaseUrl}/entries', timeout=2) as resp:
+                vaultEntries = json.loads(resp.read().decode('utf-8'))
+
+            entryId = None
+            for entry in vaultEntries:
+                if entry.get('envVarName') == 'GITHUB_AI_TOKEN':
+                    entryId = entry.get('id')
+                    break
+
+            if not entryId:
+                return ''
+
+            # Step 2: Request a short-lived injection script for that entry
+            injectPayload = json.dumps({'entryIds': [entryId]}).encode('utf-8')
+            injectRequest = urllib.request.Request(
+                f'{vaultBaseUrl}/inject',
+                data=injectPayload,
+                headers={'Content-Type': 'application/json'},
+                method='POST',
+            )
+            with urllib.request.urlopen(injectRequest, timeout=2) as resp:
+                injectData = json.loads(resp.read().decode('utf-8'))
+
+            scriptPath = injectData.get('scriptPath', '')
+            if not scriptPath or not os.path.exists(scriptPath):
+                return ''
+
+            # Step 3: Source the script in a subprocess and capture the env var value.
+            # The script sets the var and self-deletes within ~1 second.
+            result = subprocess.run(
+                [
+                    'powershell', '-NoProfile', '-NonInteractive', '-Command',
+                    f'. "{scriptPath}"; $env:GITHUB_AI_TOKEN',
+                ],
+                capture_output=True, text=True, timeout=5,
+            )
+            return result.stdout.strip()
+
+        except Exception:
+            # Vault not running, network error, or subprocess failure — fail silently
+            return ''
+
     def _step5(self):
         """Step 5: Configure the AI token.
 
@@ -335,7 +400,7 @@ class SetupWizard(tk.Tk):
         we write it straight into PathMaker's settings file and skip all manual steps.
         Otherwise we walk the user through getting a free token from GitHub.
         """
-        detectedToken = os.environ.get('GITHUB_AI_TOKEN', '').strip()
+        detectedToken = self._detect_ai_token()
 
         if detectedToken:
             c = self._card()
@@ -460,10 +525,13 @@ class SetupWizard(tk.Tk):
         self._p(c, "\nGenerate toolpaths:")
         for stepNumber, instruction in enumerate([
             "Open your 3D model in Fusion 360's  Manufacturing  workspace",
-            "Create a  CAM Setup  (set stock size and WCS zero point — normal Fusion step)",
             "Click  Generate Toolpaths  in the PathMaker toolbar",
             "Select your material from the dropdown",
-            "Click  OK  — PathMaker analyzes the geometry and builds operations automatically",
+            "Choose  Stock Mode:",
+            "   • Relative Offset  — PathMaker adds padding around your model bounding box",
+            "   • Fixed Dimensions  — enter your actual stock size (W × H × D in mm)",
+            "     ✅  No second body needed — PathMaker defines stock inside the CAM Setup automatically",
+            "Click  OK  — PathMaker analyzes the geometry and builds all operations",
             "Run the  Fusion simulation  to verify, then  post-process  as usual",
         ], 1):
             self._p(c, f"  {stepNumber}.  {instruction}")

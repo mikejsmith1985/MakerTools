@@ -415,7 +415,11 @@ class GenerateCamExecuteHandler(adsk.core.CommandEventHandler):
 
             app = adsk.core.Application.get()
             ui = app.userInterface
-            design = adsk.fusion.Design.cast(app.activeProduct)
+            # When the user is in the Manufacturing workspace, app.activeProduct is the
+            # CAM product, NOT the Design. We must navigate via the document's product list.
+            design = adsk.fusion.Design.cast(
+                app.activeDocument.products.itemByProductType('DesignProductType')
+            )
 
             if not design:
                 ui.messageBox('No active design. Open a part first.', 'FusionCam')
@@ -428,10 +432,19 @@ class GenerateCamExecuteHandler(adsk.core.CommandEventHandler):
             material_dropdown = inputs.itemById('material')
             quality_dropdown = inputs.itemById('quality')
             stock_offset_input = inputs.itemById('stockOffset')
+            stock_mode_dropdown = inputs.itemById('stockMode')
+            stock_width_input   = inputs.itemById('stockWidth')
+            stock_height_input  = inputs.itemById('stockHeight')
+            stock_depth_input   = inputs.itemById('stockDepth')
 
             material_idx = material_dropdown.selectedItem.index if material_dropdown else 0
             quality_idx = quality_dropdown.selectedItem.index if quality_dropdown else 1
-            stock_offset = stock_offset_input.value * 10.0 if stock_offset_input else 2.0  # cm to mm
+
+            # Determine stock mode — 0 = relative offset, 1 = fixed dimensions
+            isFixedStock = (
+                stock_mode_dropdown.selectedItem.index == 1
+                if stock_mode_dropdown else False
+            )
 
             # Map indices to keys
             materials = _load_materials()
@@ -498,11 +511,21 @@ class GenerateCamExecuteHandler(adsk.core.CommandEventHandler):
             )
 
             if result == adsk.core.DialogResults.DialogYes:
-                stock_config = {
-                    'mode': 'relative_offset',
-                    'offset_mm': stock_offset,
-                    'material_name': material_name
-                }
+                if isFixedStock:
+                    # User supplied physical stock dimensions — no offset guesswork needed
+                    stock_config = {
+                        'mode':          'fixed_size',
+                        'width_mm':      (stock_width_input.value  * 10.0) if stock_width_input  else 100.0,
+                        'height_mm':     (stock_height_input.value * 10.0) if stock_height_input else 100.0,
+                        'depth_mm':      (stock_depth_input.value  * 10.0) if stock_depth_input  else 10.0,
+                        'material_name': material_name,
+                    }
+                else:
+                    stock_config = {
+                        'mode':          'relative_offset',
+                        'offset_mm':     (stock_offset_input.value * 10.0) if stock_offset_input else 2.0,
+                        'material_name': material_name,
+                    }
 
                 result = cam_generator.generate_cam(
                     features, tool_assignments, material_key, stock_config, quality
@@ -520,6 +543,30 @@ class GenerateCamExecuteHandler(adsk.core.CommandEventHandler):
         except Exception:
             app = adsk.core.Application.get()
             app.userInterface.messageBox(f'Generate CAM error:\n{traceback.format_exc()}')
+
+
+class GenerateCamInputChangedHandler(adsk.core.InputChangedEventHandler):
+    """Toggles stock dimension inputs visible/hidden based on the selected stock mode."""
+
+    def __init__(self):
+        super().__init__()
+
+    def notify(self, args):
+        try:
+            changedInput = args.input
+            if changedInput.id != 'stockMode':
+                return
+
+            isFixedMode = (changedInput.selectedItem.index == 1)
+            allInputs = args.inputs
+
+            # Show/hide the appropriate stock inputs for the chosen mode
+            allInputs.itemById('stockOffset').isVisible = not isFixedMode
+            allInputs.itemById('stockWidth').isVisible  = isFixedMode
+            allInputs.itemById('stockHeight').isVisible = isFixedMode
+            allInputs.itemById('stockDepth').isVisible  = isFixedMode
+        except Exception:
+            pass  # Never let a UI refresh error crash Fusion
 
 
 def on_generate_cam_created(args):
@@ -556,12 +603,33 @@ def on_generate_cam_created(args):
     for q_key, q_name in [('draft', 'Draft (Fast)'), ('standard', 'Standard'), ('fine', 'Fine (Slow, Smooth)')]:
         quality_dropdown.listItems.add(q_name, q_key == default_quality)
 
-    # Stock offset
+    # Stock mode selector — lets the user choose between padding or exact physical dimensions
+    stock_mode_dropdown = inputs.addDropDownCommandInput(
+        'stockMode', 'Stock Mode',
+        adsk.core.DropDownStyles.TextListDropDownStyle
+    )
+    stock_mode_dropdown.listItems.add('Relative Offset (add padding)', True)
+    stock_mode_dropdown.listItems.add('Fixed Dimensions (exact size)', False)
+
+    # Relative offset — default 2mm padding on all sides (shown by default)
     inputs.addValueInput(
         'stockOffset', 'Stock Offset',
         'mm',
-        adsk.core.ValueInput.createByReal(0.2)  # 2mm in cm
+        adsk.core.ValueInput.createByReal(0.2)  # 2 mm in cm
     )
+
+    # Fixed dimension inputs — hidden until the user selects "Fixed Dimensions"
+    stockWidthInput  = inputs.addValueInput('stockWidth',  'Stock Width  (X)', 'mm', adsk.core.ValueInput.createByReal(10.0))
+    stockHeightInput = inputs.addValueInput('stockHeight', 'Stock Height (Y)', 'mm', adsk.core.ValueInput.createByReal(10.0))
+    stockDepthInput  = inputs.addValueInput('stockDepth',  'Stock Depth  (Z)', 'mm', adsk.core.ValueInput.createByReal(1.0))
+    stockWidthInput.isVisible  = False
+    stockHeightInput.isVisible = False
+    stockDepthInput.isVisible  = False
+
+    # Wire up the InputChanged handler so mode toggle shows/hides the right fields
+    input_changed_handler = GenerateCamInputChangedHandler()
+    cmd.inputChanged.add(input_changed_handler)
+    _handlers.append(input_changed_handler)
 
     handler = GenerateCamExecuteHandler()
     cmd.execute.add(handler)

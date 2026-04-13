@@ -13,6 +13,7 @@ No experience needed. No paid subscriptions. Just tools that work.
 | [🛤 PathMaker](./PathMaker/README.md) | Builds your CNC tool library from Amazon links and generates toolpaths with one click | CNC users with Fusion 360 |
 | [🎨 TextureForge](./TextureForge/README.md) | Stamps textures (carbon fiber, knurl, wood grain…) onto any 3D model face | 3D printer users and CNC users with Fusion 360 |
 | [💧 MisterWizard](./MisterWizard/README.md) | Walks you through setting up a mist coolant solenoid on your Onefinity CNC | Onefinity CNC users |
+| [⚡ WiringWizard](./WiringWizard/README.md) | Plans wiring diagrams and harness layouts for low-voltage projects with ASCII diagrams, connection tables, and BOM recommendations | Makers planning electrical and low-voltage systems |
 
 ---
 
@@ -64,6 +65,18 @@ Before using any of these tools, make sure you have:
 3. Follow the wizard — it walks you through everything step by step
 
 👉 [Full MisterWizard guide →](./MisterWizard/README.md)
+
+---
+
+### ⚡ WiringWizard (Wiring Diagrams for Low-Voltage Projects)
+
+> *"I want to plan wiring harnesses and electrical layouts for my project."*
+
+1. Open the `WiringWizard` folder
+2. Double-click **`start.bat`**
+3. Follow the wizard to create your wiring diagram
+
+👉 [Full WiringWizard guide →](./WiringWizard/README.md)
 
 ---
 

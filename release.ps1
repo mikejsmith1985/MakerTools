@@ -9,7 +9,7 @@
       3. Commits staged changes, pushes the feature branch, merges to main
       4. Re-creates the version tag cleanly
       5. Creates the GitHub release
-      6. Zips PathMaker, TextureForge, and MisterWizard
+      6. Zips PathMaker, TextureForge, MisterWizard, and WiringWizard
       7. Uploads the zip assets to the release
       8. Cleans up temp files and returns to the feature branch
 
@@ -48,7 +48,7 @@ Write-Host "`n[2/6] Publishing branch and merging to main..." -ForegroundColor C
 
 $featureBranch = git branch --show-current
 git add -A
-git commit -m "Release $Version" --allow-empty
+git commit -m "Release $Version" -m "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>" --allow-empty
 if ($LASTEXITCODE -ne 0) { Write-Error "git commit failed"; exit 1 }
 
 git push origin $featureBranch
@@ -99,7 +99,7 @@ New-Item    $stagingDir -ItemType Directory | Out-Null
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 $zipPaths = @()
-foreach ($toolName in @("PathMaker", "TextureForge", "MisterWizard")) {
+foreach ($toolName in @("PathMaker", "TextureForge", "MisterWizard", "WiringWizard")) {
     $toolSource = Join-Path $repoRoot $toolName
     $toolStage  = Join-Path $stagingDir $toolName   # folder is named $toolName so zip root is $toolName/
     $zipDest    = Join-Path $stagingDir "$toolName-$Version.zip"

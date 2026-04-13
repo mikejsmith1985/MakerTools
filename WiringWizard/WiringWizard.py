@@ -188,8 +188,18 @@ def _normalize_optional_string(raw_value: Any) -> Optional[str]:
 # ── Theme Configuration ───────────────────────────────────────────────────────
 
 
-def _apply_modern_theme(root: tk.Tk) -> None:
-    """Configure ttk styles for a modern, card-based look across the whole app."""
+def _apply_modern_theme(root: tk.Tk) -> str:
+    """
+    Configure ttk styles for a modern, card-based look across the whole app.
+
+    Returns the resolved body font family name so callers can create additional
+    Font objects without re-querying the available families list.
+
+    Note: we create tkfont.Font objects and pass them to style.configure() rather
+    than using raw tuples.  Python 3.14 changed how Tkinter converts tuples to Tcl
+    font specs — family names that contain spaces (e.g. "Segoe UI") are no longer
+    auto-quoted, causing a TclError.  Named Font objects bypass that code path.
+    """
     style = ttk.Style(root)
     style.theme_use("clam")
 
@@ -197,10 +207,16 @@ def _apply_modern_theme(root: tk.Tk) -> None:
     body_family = "Segoe UI" if "Segoe UI" in available_families else "TkDefaultFont"
     mono_family = "Consolas" if "Consolas" in available_families else "TkFixedFont"
 
-    root.option_add("*Font", f"{body_family} 10")
-    root.option_add("*Text.Font", f"{mono_family} 10")
+    # Named font objects — Tcl references them by name, avoiding any tuple-parsing issues.
+    body_10 = tkfont.Font(family=body_family, size=10)
+    body_10_bold = tkfont.Font(family=body_family, size=10, weight="bold")
+    body_9 = tkfont.Font(family=body_family, size=9)
+    mono_10 = tkfont.Font(family=mono_family, size=10)
 
-    style.configure(".", font=(body_family, 10), background=COLOR_SURFACE)
+    root.option_add("*Font", body_10)
+    root.option_add("*Text.Font", mono_10)
+
+    style.configure(".", font=body_10, background=COLOR_SURFACE)
     style.configure("TFrame", background=COLOR_SURFACE)
     style.configure("TLabel", background=COLOR_SURFACE, foreground="#334155")
     style.configure("TEntry", fieldbackground=COLOR_CARD_BG)
@@ -214,7 +230,7 @@ def _apply_modern_theme(root: tk.Tk) -> None:
     )
     style.configure(
         "TNotebook.Tab",
-        font=(body_family, 10, "bold"),
+        font=body_10_bold,
         padding=(18, 8),
         background="#e2e8f0",
         foreground="#475569",
@@ -235,7 +251,7 @@ def _apply_modern_theme(root: tk.Tk) -> None:
     )
     style.configure(
         "Card.TLabelframe.Label",
-        font=(body_family, 10, "bold"),
+        font=body_10_bold,
         background=COLOR_CARD_BG,
         foreground="#334155",
     )
@@ -248,7 +264,7 @@ def _apply_modern_theme(root: tk.Tk) -> None:
     # Section header labels
     style.configure(
         "SectionTitle.TLabel",
-        font=(body_family, 10, "bold"),
+        font=body_10_bold,
         background=COLOR_CARD_BG,
         foreground="#334155",
     )
@@ -256,7 +272,7 @@ def _apply_modern_theme(root: tk.Tk) -> None:
     # Primary action button — bold accent
     style.configure(
         "Primary.TButton",
-        font=(body_family, 10, "bold"),
+        font=body_10_bold,
         padding=(16, 6),
         background=COLOR_ACCENT,
         foreground="#ffffff",
@@ -269,7 +285,7 @@ def _apply_modern_theme(root: tk.Tk) -> None:
     # Secondary button — neutral
     style.configure(
         "Secondary.TButton",
-        font=(body_family, 10),
+        font=body_10,
         padding=(12, 5),
         background="#e2e8f0",
         foreground="#334155",
@@ -286,11 +302,13 @@ def _apply_modern_theme(root: tk.Tk) -> None:
     )
     style.configure(
         "StatusBar.TLabel",
-        font=(body_family, 9),
+        font=body_9,
         background=COLOR_STATUS_BG,
         foreground=COLOR_MUTED_FG,
         padding=(12, 4),
     )
+
+    return body_family
 
 
 # ── Application Shell ─────────────────────────────────────────────────────────
@@ -307,7 +325,9 @@ class WiringWizardApp(tk.Tk):
         self.configure(background=COLOR_SURFACE)
         self._current_project: Optional[WiringProject] = None
 
-        _apply_modern_theme(self)
+        # Store the resolved font family so _build_header_bar and any other tk.Widget
+        # callers can create matching Font objects without re-querying the family list.
+        self._body_font_family: str = _apply_modern_theme(self)
         self._build_main_layout()
         self._set_default_templates()
         self._load_draft_if_available()
@@ -342,10 +362,15 @@ class WiringWizardApp(tk.Tk):
         header_frame.pack(fill=tk.X, side=tk.TOP)
         header_frame.pack_propagate(False)
 
+        # Use tkfont.Font objects so that family names with spaces (e.g. "Segoe UI")
+        # are referenced by their Tcl font name — never parsed from a raw tuple.
+        title_font = tkfont.Font(family=self._body_font_family, size=14, weight="bold")
+        subtitle_font = tkfont.Font(family=self._body_font_family, size=10)
+
         tk.Label(
             header_frame,
             text="⚡  WiringWizard",
-            font=("Segoe UI", 14, "bold"),
+            font=title_font,
             background=COLOR_HEADER_BG,
             foreground=COLOR_HEADER_FG,
             padx=16,
@@ -354,7 +379,7 @@ class WiringWizardApp(tk.Tk):
         tk.Label(
             header_frame,
             text="Wiring Diagram & Harness Planner",
-            font=("Segoe UI", 10),
+            font=subtitle_font,
             background=COLOR_HEADER_BG,
             foreground="#94a3b8",
         ).pack(side=tk.LEFT, padx=(0, 12))

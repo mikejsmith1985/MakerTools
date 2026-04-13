@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `GenerateCamInputChangedHandler` in `handlers.py` toggles stock input visibility when the mode dropdown changes
 
 ### Fixed
+- **WiringWizard — Python 3.14 Tkinter font crash on startup**: Font specifications were passed as raw Python tuples (e.g. `("Segoe UI", 14, "bold")`). Python 3.14 changed how Tkinter serializes these tuples into Tcl font specs — family names containing spaces are no longer auto-quoted, causing a `TclError: expected integer but got "UI"` crash on every launch. Fixed by replacing all raw tuple fonts with `tkfont.Font` objects (referenced by their Tcl name) and converting `_apply_modern_theme` to return the resolved font family so `_build_header_bar` can create matching objects without re-querying the family list.
 - `release.ps1` now builds and uploads a dedicated `WiringWizard-<version>.zip` release asset alongside the other MakerTools packages.
 - Setup wizard content area now uses a scrollable Canvas so no step is ever clipped
 - Setup wizard step 5 now queries Forge Vault HTTP API as a fallback when wizard is run outside Forge Terminal, so the AI token is auto-detected regardless of how the wizard was launched

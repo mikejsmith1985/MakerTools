@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WiringWizard — modernized desktop UI refresh**: Intake, Output, and Re-map surfaces were redesigned with a card-based layout, clearer hierarchy, polished theming, and a persistent status bar so the workflow is more intuitive and engaging.
+- **WiringWizard — frozen-runtime data path support**: runtime paths now resolve from the executable directory in packaged builds so draft and AI token settings persist correctly when running `WiringWizard.exe`.
+- **WiringWizard — standalone executable distribution**: `release.ps1` now builds a `WiringWizard-<version>.exe` via PyInstaller and uploads it as a dedicated release asset alongside the existing zip archives. Users can download and run WiringWizard without installing Python.
+- **WiringWizard — robust launcher fallback chain**: `start.bat` now checks for `WiringWizard.exe` first, then falls back through `pythonw` → `pyw` → `python` → `py`, with a clear error message pointing to both the exe download and Python install pages when nothing is found.
+
+### Added
 - **WiringWizard — GUI-first AI setup and launch flow**: users can configure AI access entirely in the desktop UI and start the app without a console window on Windows.
   - `WiringWizard/WiringWizard.py` — AI Assist now includes masked token entry with **Save Token**/**Clear Token** actions; saved token is passed directly to AI draft generation
   - `WiringWizard/core/ai_intake.py` — added GUI token persistence helpers (`get_saved_gui_api_token`, `save_gui_api_token`, `clear_saved_gui_api_token`) backed by `WiringWizard/data/ai_settings.json`; `draft_project_from_brief` now accepts an `api_token_override`

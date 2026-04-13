@@ -26,10 +26,27 @@ For home electrical mains (120V/240V), WiringWizard v1 provides **checklist-only
 
 ## Start WiringWizard
 
-### Windows
+### Option A — Standalone Executable (no Python needed)
 
-Double-click **`start.bat`**. It launches WiringWizard in GUI mode (no console window when
-`pythonw` is available).
+Download **`WiringWizard-<version>.exe`** from
+[GitHub Releases](https://github.com/mikejsmith1985/MakerTools/releases) and
+double-click it. No installation or Python runtime required.
+
+You can also place the exe in the `WiringWizard/` folder — `start.bat` will
+detect it automatically and launch it instead of the Python script.
+
+### Option B — Windows (Python)
+
+Double-click **`start.bat`**. The launcher tries interpreters in this order:
+
+1. **WiringWizard.exe** — standalone executable (if present in the folder)
+2. **pythonw** — GUI mode, no console window (best UX)
+3. **pyw** — Python launcher for Windows, windowless mode
+4. **python** — standard interpreter (console window visible)
+5. **py** — Python launcher for Windows (console fallback)
+
+If none are found, the launcher prints download links for both the exe and
+Python.
 
 ### Mac / Linux
 

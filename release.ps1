@@ -10,8 +10,9 @@
       4. Re-creates the version tag cleanly
       5. Creates the GitHub release
       6. Zips PathMaker, TextureForge, MisterWizard, and WiringWizard
-      7. Uploads the zip assets to the release
-      8. Cleans up temp files and returns to the feature branch
+      7. Builds WiringWizard standalone exe via PyInstaller
+      8. Uploads the zip + exe assets to the release
+      9. Cleans up temp files and returns to the feature branch
 
 .PARAMETER Version
     Release version tag in the form vX.Y.Z  (e.g. v1.0.17)
@@ -34,7 +35,7 @@ Set-StrictMode -Version Latest
 Remove-Item Env:\GH_TOKEN -ErrorAction SilentlyContinue
 
 # ── Step 2: Verify gh is authenticated before doing any git work ─────────────
-Write-Host "`n[1/6] Checking gh auth..." -ForegroundColor Cyan
+Write-Host "`n[1/7] Checking gh auth..." -ForegroundColor Cyan
 $authOutput = gh auth status 2>&1
 if ($LASTEXITCODE -ne 0) {
     Write-Host $authOutput -ForegroundColor Red
@@ -44,7 +45,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "      ✅  Authenticated." -ForegroundColor Green
 
 # ── Step 3: Git — commit, push feature branch, fast-forward merge to main ────
-Write-Host "`n[2/6] Publishing branch and merging to main..." -ForegroundColor Cyan
+Write-Host "`n[2/7] Publishing branch and merging to main..." -ForegroundColor Cyan
 
 $featureBranch = git branch --show-current
 git add -A
@@ -73,7 +74,7 @@ if ($LASTEXITCODE -ne 0) { Write-Error "git push tag failed"; exit 1 }
 Write-Host "      ✅  Tag $Version pushed." -ForegroundColor Green
 
 # ── Step 4: Create the GitHub release ────────────────────────────────────────
-Write-Host "`n[3/6] Creating GitHub release..." -ForegroundColor Cyan
+Write-Host "`n[3/7] Creating GitHub release..." -ForegroundColor Cyan
 gh release delete $Version --yes 2>$null
 
 gh release create $Version `
@@ -89,7 +90,7 @@ Write-Host "      ✅  Release created." -ForegroundColor Green
 # files) and then .NET ZipFile for reliable zip creation.  Compress-Archive is
 # NOT used because it includes long __pycache__ paths that break Windows Explorer
 # extraction and includes data/user_settings.json which may contain credentials.
-Write-Host "`n[4/6] Building zip assets..." -ForegroundColor Cyan
+Write-Host "`n[4/7] Building zip assets..." -ForegroundColor Cyan
 
 $repoRoot   = if ($PSScriptRoot) { $PSScriptRoot } else { $PWD.Path }
 $stagingDir = Join-Path $env:TEMP "MakerTools-release-$Version"
@@ -146,15 +147,73 @@ foreach ($toolName in @("PathMaker", "TextureForge", "MisterWizard", "WiringWiza
     $zipPaths += $zipDest
 }
 
-# ── Step 6: Upload assets ─────────────────────────────────────────────────────
-Write-Host "`n[5/6] Uploading assets to GitHub..." -ForegroundColor Cyan
-gh release upload $Version @zipPaths --clobber
+# ── Step 6: Build WiringWizard standalone exe ─────────────────────────────────
+# PyInstaller bundles WiringWizard into a single .exe so end-users don't need
+# Python installed. The exe is mandatory for release and is uploaded as a
+# dedicated asset alongside the zip archives.
+Write-Host "`n[5/7] Building WiringWizard standalone exe..." -ForegroundColor Cyan
+
+$wiringWizardSource = Join-Path $repoRoot "WiringWizard"
+$wiringWizardEntry  = Join-Path $wiringWizardSource "WiringWizard.py"
+$exeBuildDir        = Join-Path $stagingDir "exe-build"
+$exeDistDir         = Join-Path $exeBuildDir "dist"
+$exeAssetName       = "WiringWizard-$Version.exe"
+$exeAssetPath       = Join-Path $stagingDir $exeAssetName
+
+$uploadPaths = @() + $zipPaths   # start with zips, may append exe below
+
+$pythonCommand = Get-Command python -ErrorAction SilentlyContinue
+if (-not $pythonCommand) {
+    Write-Error "python is required to build WiringWizard.exe"
+    exit 1
+}
+
+& $pythonCommand.Source -m PyInstaller --version 2>$null | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "      Installing PyInstaller..." -ForegroundColor Yellow
+    & $pythonCommand.Source -m pip install pyinstaller --quiet
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Failed to install PyInstaller."
+        exit 1
+    }
+}
+
+# --onefile    : single exe
+# --windowed   : no console window (Tkinter GUI app)
+# --name       : output binary name
+# --distpath   : write exe here
+# --workpath / --specpath : keep build artefacts in staging dir
+& $pythonCommand.Source -m PyInstaller --onefile --windowed `
+    --name "WiringWizard" `
+    --distpath $exeDistDir `
+    --workpath (Join-Path $exeBuildDir "build") `
+    --specpath $exeBuildDir `
+    $wiringWizardEntry 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "PyInstaller build failed (exit $LASTEXITCODE)."
+    exit 1
+}
+
+$builtExe = Join-Path $exeDistDir "WiringWizard.exe"
+if (-not (Test-Path $builtExe)) {
+    Write-Error "PyInstaller completed but expected exe was not found at $builtExe"
+    exit 1
+}
+
+Copy-Item $builtExe $exeAssetPath -Force
+$exeSizeKb = [math]::Round((Get-Item $exeAssetPath).Length / 1KB, 1)
+Write-Host "      $exeAssetName  ($exeSizeKb KB)" -ForegroundColor Green
+$uploadPaths += $exeAssetPath
+
+# ── Step 7: Upload assets ─────────────────────────────────────────────────────
+Write-Host "`n[6/7] Uploading assets to GitHub..." -ForegroundColor Cyan
+gh release upload $Version @uploadPaths --clobber
 if ($LASTEXITCODE -ne 0) { Write-Error "gh release upload failed"; exit 1 }
 
-Write-Host "      ✅  $(($zipPaths).Count) assets uploaded." -ForegroundColor Green
+Write-Host "      ✅  $(($uploadPaths).Count) assets uploaded." -ForegroundColor Green
 
-# ── Step 7: Clean up and return to feature branch ────────────────────────────
-Write-Host "`n[6/6] Cleaning up..." -ForegroundColor Cyan
+# ── Step 8: Clean up and return to feature branch ────────────────────────────
+Write-Host "`n[7/7] Cleaning up..." -ForegroundColor Cyan
 Remove-Item $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
 git checkout $featureBranch
 

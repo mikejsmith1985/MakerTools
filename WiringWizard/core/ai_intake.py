@@ -10,6 +10,8 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.runtime_paths import resolve_runtime_app_dir
+
 # ── API Constants ──────────────────────────────────────────────────────────────
 
 AI_API_ENDPOINT = "https://models.inference.ai.azure.com/chat/completions"
@@ -28,8 +30,9 @@ TOKEN_ENV_VARS: Tuple[str, ...] = (
     "GITHUB_AI_TOKEN",
 )
 
-MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
-APP_DIR = os.path.dirname(MODULE_DIR)
+# Use the shared runtime-path resolver so data paths survive PyInstaller freezing.
+# ai_intake.py lives in core/, so source mode must step up one directory.
+APP_DIR = resolve_runtime_app_dir(__file__, source_parent_levels=1)
 DATA_DIR = os.path.join(APP_DIR, "data")
 AI_SETTINGS_FILE_PATH = os.path.join(DATA_DIR, "ai_settings.json")
 

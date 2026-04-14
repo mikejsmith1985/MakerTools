@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **WiringWizard — complete UX redesign**: replaced all JSON text editors with visual Treeview tables and modal form dialogs. Components and connections are now managed via Add/Edit/Delete toolbars with dropdowns, spinboxes, and editable combo boxes — virtually no typing required. AI-first "Describe Your Project" tab is the default landing surface. Copy-to-clipboard on the plan output tab. Persistent project bar (name, domain, voltage) always visible. Legacy draft format backward-compatible on load.
+
 ### Added
 - **WiringWizard — modernized desktop UI refresh**: Intake, Output, and Re-map surfaces were redesigned with a card-based layout, clearer hierarchy, polished theming, and a persistent status bar so the workflow is more intuitive and engaging.
 - **WiringWizard — frozen-runtime data path support**: runtime paths now resolve from the executable directory in packaged builds so draft and AI token settings persist correctly when running `WiringWizard.exe`.

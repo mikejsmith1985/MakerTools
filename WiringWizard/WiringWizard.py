@@ -1932,11 +1932,16 @@ class WiringWizardApp(tk.Tk):
             command=self._on_clear_ai_token,
         ).pack(side=tk.LEFT, padx=(4, 0))
 
-        initial_token_hint = (
-            "Token loaded for this app."
-            if self.ai_token_var.get().strip()
-            else "No saved token \u2014 fallback parser will be used."
-        )
+        # Show a helpful hint about which token source is active
+        from core.ai_intake import resolve_api_token
+        has_gui_token = bool(self.ai_token_var.get().strip())
+        has_env_token = bool(resolve_api_token())
+        if has_gui_token:
+            initial_token_hint = "\u2705 Token loaded from saved settings."
+        elif has_env_token:
+            initial_token_hint = "\u2705 Token detected from environment (Forge Vault)."
+        else:
+            initial_token_hint = "No token found \u2014 fallback parser will be used."
         self._token_hint_var = tk.StringVar(value=initial_token_hint)
         ttk.Label(
             token_card, textvariable=self._token_hint_var, style="CardMuted.TLabel",

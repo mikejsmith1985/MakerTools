@@ -908,6 +908,8 @@ class DiagramCanvas(tk.Canvas):
         self._scale_factor = 1.0
         self._tooltip_items: list[int] = []
         self._overlay_items: list[int] = []
+        self._dimmed_items: dict[int, dict[str, str]] = {}
+        self._detail_frame: Optional[tk.Frame] = None
         self._is_selected = False
 
         self.bind("<ButtonPress-1>", self._on_click)
@@ -931,6 +933,8 @@ class DiagramCanvas(tk.Canvas):
         self._is_selected = False
         self._tooltip_items.clear()
         self._overlay_items.clear()
+        self._dimmed_items.clear()
+        self._destroy_detail_panel()
         self.delete("all")
         self._node_layout.clear()
 
@@ -1010,8 +1014,8 @@ class DiagramCanvas(tk.Canvas):
                 cur_y += node_height + NODE_MARGIN_Y
 
         COL_L = 60
-        COL_C = COL_L + NODE_WIDTH + NODE_MARGIN_X + 120
-        COL_R = COL_C + NODE_WIDTH + NODE_MARGIN_X + 120
+        COL_C = COL_L + NODE_WIDTH + NODE_MARGIN_X + 180
+        COL_R = COL_C + NODE_WIDTH + NODE_MARGIN_X + 180
 
         _place_column(left_nodes, COL_L, 80)
         _place_column(center_nodes, COL_C, 80)
@@ -1192,7 +1196,7 @@ class DiagramCanvas(tk.Canvas):
         ]
 
     def _draw_legend(self) -> None:
-        """Floating legend panel showing component type and wire colors."""
+        """Legend panel positioned below all diagram nodes."""
         used_types: dict[str, str] = {}
         for comp in self._component_data:
             comp_type = comp.get("component_type", "").lower()
@@ -1208,44 +1212,57 @@ class DiagramCanvas(tk.Canvas):
 
         title_font = tkfont.Font(family="Segoe UI", size=8, weight="bold")
         label_font = tkfont.Font(family="Segoe UI", size=8)
-        legend_x, legend_y = 20, 20
+
+        # Place legend below the lowest node in the diagram
+        max_bottom_y = 0
+        for layout in self._node_layout.values():
+            max_bottom_y = max(max_bottom_y, layout["y"] + layout["height"])
+        legend_x = 60
+        legend_y = max_bottom_y + 40
         row_height = 20
-        legend_width = 150
-        total_rows = len(used_types) + len(used_wires) + 2
-        legend_height = total_rows * row_height + 24
+
+        # Horizontal layout: components section then wires section side by side
+        comp_section_width = 160
+        wire_section_width = 160
+        total_width = comp_section_width + wire_section_width + 30
+        total_rows = max(len(used_types), len(used_wires))
+        legend_height = total_rows * row_height + 44
 
         # Shadow + panel
         self._smooth_rect(
             legend_x + 2, legend_y + 2,
-            legend_x + legend_width + 2, legend_y + legend_height + 2,
+            legend_x + total_width + 2, legend_y + legend_height + 2,
             radius=8, fill=SHADOW_COLOR, outline=SHADOW_COLOR, tags="legend",
         )
         self._smooth_rect(
-            legend_x, legend_y, legend_x + legend_width, legend_y + legend_height,
+            legend_x, legend_y, legend_x + total_width, legend_y + legend_height,
             radius=8, fill=COLOR_CARD_BG, outline=COLOR_BORDER, tags="legend",
         )
 
+        # Components column
+        cx = legend_x + 14
         cur_y = legend_y + 14
-        self.create_text(legend_x + 14, cur_y, text="COMPONENTS", fill=COLOR_TEXT,
+        self.create_text(cx, cur_y, text="COMPONENTS", fill=COLOR_TEXT,
                          font=title_font, anchor="w", tags="legend")
         cur_y += row_height
         for type_name, type_color in used_types.items():
             self.create_rectangle(
-                legend_x + 14, cur_y - 5, legend_x + 18, cur_y + 5,
+                cx, cur_y - 5, cx + 4, cur_y + 5,
                 fill=type_color, outline=type_color, tags="legend",
             )
-            self.create_text(legend_x + 24, cur_y, text=type_name.capitalize(),
+            self.create_text(cx + 10, cur_y, text=type_name.capitalize(),
                              fill=COLOR_TEXT_MUTED, font=label_font, anchor="w", tags="legend")
             cur_y += row_height
-        self.create_text(legend_x + 14, cur_y, text="WIRES", fill=COLOR_TEXT,
+
+        # Wires column
+        wx = legend_x + comp_section_width + 20
+        cur_y = legend_y + 14
+        self.create_text(wx, cur_y, text="WIRES", fill=COLOR_TEXT,
                          font=title_font, anchor="w", tags="legend")
         cur_y += row_height
         for color_name, color_hex in used_wires.items():
-            self.create_line(
-                legend_x + 14, cur_y, legend_x + 30, cur_y,
-                fill=color_hex, width=2, tags="legend",
-            )
-            self.create_text(legend_x + 36, cur_y, text=color_name.capitalize(),
+            self.create_line(wx, cur_y, wx + 16, cur_y, fill=color_hex, width=2, tags="legend")
+            self.create_text(wx + 22, cur_y, text=color_name.capitalize(),
                              fill=COLOR_TEXT_MUTED, font=label_font, anchor="w", tags="legend")
             cur_y += row_height
 
@@ -1341,11 +1358,22 @@ class DiagramCanvas(tk.Canvas):
     def _apply_highlight(
         self, active_nodes: set[str], active_wires: set[str],
     ) -> None:
-        """Dim everything not in the active sets, brighten what is."""
+        """Dim non-active items by swapping their colors to near-black.
+
+        Stipple patterns look terrible on dark backgrounds, so we store each
+        item's original fill/outline and swap to very dark replacement colors.
+        Active items keep their vibrant colors and get a highlight border.
+        """
         self._clear_overlays()
         self._is_selected = True
 
-        # Dim non-active nodes via stipple overlay
+        # Near-black colors that are barely visible on #0d1117 background
+        DIM_FILL = "#080a0f"
+        DIM_OUTLINE = "#10141a"
+        DIM_TEXT = "#1e2228"
+        DIM_WIRE = "#12161c"
+
+        # Dim non-active node items by swapping colors
         for cid in self._node_layout:
             if cid in active_nodes:
                 continue
@@ -1353,22 +1381,14 @@ class DiagramCanvas(tk.Canvas):
                 tags = self.gettags(item)
                 if "grid" in tags or "legend" in tags:
                     continue
-                try:
-                    self.itemconfigure(item, stipple="gray25")
-                except tk.TclError:
-                    pass
+                self._dim_item(item, DIM_FILL, DIM_OUTLINE, DIM_TEXT, DIM_WIRE)
 
-        # Dim non-active wires
+        # Dim non-active wire items
         for conn in self._connection_data:
             if conn["connection_id"] in active_wires:
                 continue
             for item in self.find_withtag(conn["connection_id"]):
-                tags = self.gettags(item)
-                if "wire" in tags or "wire_glow" in tags:
-                    try:
-                        self.itemconfigure(item, stipple="gray25")
-                    except tk.TclError:
-                        pass
+                self._dim_item(item, DIM_FILL, DIM_OUTLINE, DIM_TEXT, DIM_WIRE)
 
         # Highlight border on each active node
         for cid in active_nodes:
@@ -1381,30 +1401,66 @@ class DiagramCanvas(tk.Canvas):
             node_x, node_y = layout["x"], layout["y"]
             node_width, node_height = layout["width"], layout["height"]
             highlight_id = self._smooth_rect(
-                node_x - 2, node_y - 2, node_x + node_width + 2, node_y + node_height + 2,
+                node_x - 3, node_y - 3, node_x + node_width + 3, node_y + node_height + 3,
                 radius=12, fill="", outline=type_color, width=2, tags=("highlight",),
             )
             self._overlay_items.append(highlight_id)
 
+    def _dim_item(
+        self, item: int,
+        dim_fill: str, dim_outline: str, dim_text: str, dim_wire: str,
+    ) -> None:
+        """Swap a single canvas item's colors to dim versions, storing originals."""
+        item_type = self.type(item)
+        try:
+            if item_type == "text":
+                orig_fill = self.itemcget(item, "fill")
+                if orig_fill and item not in self._dimmed_items:
+                    self._dimmed_items[item] = {"fill": orig_fill}
+                    self.itemconfigure(item, fill=dim_text)
+            elif item_type in ("rectangle", "polygon", "oval"):
+                orig_fill = self.itemcget(item, "fill")
+                orig_outline = self.itemcget(item, "outline")
+                if item not in self._dimmed_items:
+                    self._dimmed_items[item] = {"fill": orig_fill, "outline": orig_outline}
+                    self.itemconfigure(item, fill=dim_fill, outline=dim_outline)
+            elif item_type == "line":
+                orig_fill = self.itemcget(item, "fill")
+                if item not in self._dimmed_items:
+                    self._dimmed_items[item] = {"fill": orig_fill}
+                    self.itemconfigure(item, fill=dim_wire)
+        except tk.TclError:
+            pass
+
     def _clear_overlays(self) -> None:
-        """Remove all highlights, panels, and restore full opacity."""
+        """Remove highlights, restore dimmed item colors, and destroy detail panel."""
         self._is_selected = False
+        # Restore original colors on every dimmed item
+        for item_id, original_config in self._dimmed_items.items():
+            try:
+                self.itemconfigure(item_id, **original_config)
+            except tk.TclError:
+                pass
+        self._dimmed_items.clear()
+        # Remove highlight borders
         for item_id in self._overlay_items:
             self.delete(item_id)
         self._overlay_items.clear()
         self.delete("highlight")
-        self.delete("detail_panel")
-        # Restore stipple on every canvas item
-        for item in self.find_all():
-            try:
-                self.itemconfigure(item, stipple="")
-            except tk.TclError:
-                pass
+        # Destroy the floating detail panel
+        self._destroy_detail_panel()
+
+    def _destroy_detail_panel(self) -> None:
+        """Remove the floating tk.Frame detail panel if it exists."""
+        if self._detail_frame is not None:
+            self._detail_frame.destroy()
+            self._detail_frame = None
 
     # ── Detail Panels ─────────────────────────────────────────────────────
 
     def _show_component_panel(self, component_id: str) -> None:
-        """Floating card at top-right showing component details and wire list."""
+        """Floating tk.Frame overlay at top-right showing component details."""
+        self._destroy_detail_panel()
         layout = self._node_layout.get(component_id)
         if not layout:
             return
@@ -1416,86 +1472,87 @@ class DiagramCanvas(tk.Canvas):
         value_font = tkfont.Font(family="Segoe UI", size=9, weight="bold")
         wire_font = tkfont.Font(family="Consolas", size=8)
 
-        wires = [c for c in self._connection_data
-                 if c["from_component_id"] == component_id
-                 or c["to_component_id"] == component_id]
+        # Outer frame with border, placed at top-right of this canvas widget
+        self._detail_frame = tk.Frame(
+            self, bg=COLOR_CARD_BG,
+            highlightbackground=COLOR_BORDER, highlightthickness=1,
+        )
+        self._detail_frame.place(relx=1.0, x=-12, y=8, anchor="ne", width=320)
 
-        panel_width = 310
-        panel_x = self.canvasx(self.winfo_width() - panel_width - 16)
-        panel_y = self.canvasy(12)
-        panel_height = 50 + 5 * 20 + len(wires) * 20
+        inner = tk.Frame(self._detail_frame, bg=COLOR_CARD_BG, padx=12, pady=10)
+        inner.pack(fill=tk.BOTH, expand=True)
 
-        self._draw_panel_bg(panel_x, panel_y, panel_width, panel_height)
-
+        # Header row: accent bar + title + close button
+        header_row = tk.Frame(inner, bg=COLOR_CARD_BG)
+        header_row.pack(fill=tk.X, pady=(0, 8))
         type_color = COMPONENT_TYPE_COLORS.get(
             comp.get("component_type", "").lower(), COLOR_ACCENT,
         )
-        # Accent bar
-        self._overlay_items.append(self.create_rectangle(
-            panel_x + 10, panel_y + 8, panel_x + 14, panel_y + 28,
-            fill=type_color, outline=type_color, tags="detail_panel",
-        ))
+        tk.Frame(header_row, bg=type_color, width=4, height=22).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(
+            header_row, text=comp["component_name"], fg=COLOR_TEXT,
+            bg=COLOR_CARD_BG, font=title_font, anchor="w",
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        close_label = tk.Label(
+            header_row, text="\u2715", fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CARD_BG, font=label_font, cursor="hand2",
+        )
+        close_label.pack(side=tk.RIGHT)
+        close_label.bind("<Button-1>", lambda _event: self._clear_overlays())
 
-        text_y = panel_y + 18
-        self._overlay_items.append(self.create_text(
-            panel_x + 20, text_y, text=comp["component_name"],
-            fill=COLOR_TEXT, font=title_font, anchor="w", tags="detail_panel",
-        ))
-        self._overlay_items.append(self.create_text(
-            panel_x + panel_width - 14, panel_y + 14, text="\u2715",
-            fill=COLOR_TEXT_MUTED, font=label_font, anchor="e", tags="detail_panel",
-        ))
-
-        text_y += 28
-        for label_text, value_text in [
+        # Detail rows
+        wires = [c for c in self._connection_data
+                 if c["from_component_id"] == component_id
+                 or c["to_component_id"] == component_id]
+        for detail_label, detail_value in [
             ("Type", comp.get("component_type", "").capitalize()),
             ("Current", f"{comp.get('current_draw_amps', 0)} A"),
             ("Position", comp.get("position_label", "\u2014")),
             ("Connections", str(len(wires))),
         ]:
-            self._overlay_items.append(self.create_text(
-                panel_x + 14, text_y, text=f"{label_text}:",
-                fill=COLOR_TEXT_MUTED, font=label_font, anchor="w", tags="detail_panel",
-            ))
-            self._overlay_items.append(self.create_text(
-                panel_x + 105, text_y, text=value_text,
-                fill=COLOR_TEXT, font=value_font, anchor="w", tags="detail_panel",
-            ))
-            text_y += 20
+            row = tk.Frame(inner, bg=COLOR_CARD_BG)
+            row.pack(fill=tk.X, pady=1)
+            tk.Label(
+                row, text=f"{detail_label}:", fg=COLOR_TEXT_MUTED,
+                bg=COLOR_CARD_BG, font=label_font, width=12, anchor="w",
+            ).pack(side=tk.LEFT)
+            tk.Label(
+                row, text=detail_value, fg=COLOR_TEXT,
+                bg=COLOR_CARD_BG, font=value_font, anchor="w",
+            ).pack(side=tk.LEFT)
 
-        text_y += 6
-        self._overlay_items.append(self.create_line(
-            panel_x + 10, text_y - 4, panel_x + panel_width - 10, text_y - 4,
-            fill=COLOR_BORDER, tags="detail_panel",
-        ))
-        self._overlay_items.append(self.create_text(
-            panel_x + 14, text_y, text="CONNECTED WIRES", fill=COLOR_TEXT,
-            font=label_font, anchor="w", tags="detail_panel",
-        ))
-        text_y += 20
+        # Separator
+        tk.Frame(inner, bg=COLOR_BORDER, height=1).pack(fill=tk.X, pady=8)
 
+        tk.Label(
+            inner, text=f"CONNECTED WIRES ({len(wires)})", fg=COLOR_TEXT,
+            bg=COLOR_CARD_BG, font=label_font, anchor="w",
+        ).pack(fill=tk.X, pady=(0, 4))
+
+        # Wire list
         for wire in wires:
             wire_hex = WIRE_HEX_MAP.get(wire.get("wire_color", "red"), COLOR_ACCENT)
-            self._overlay_items.append(self.create_line(
-                panel_x + 14, text_y, panel_x + 28, text_y,
-                fill=wire_hex, width=3, tags="detail_panel",
-            ))
+            wire_row = tk.Frame(inner, bg=COLOR_CARD_BG)
+            wire_row.pack(fill=tk.X, pady=1)
+            swatch = tk.Frame(wire_row, bg=wire_hex, width=16, height=3)
+            swatch.pack(side=tk.LEFT, padx=(0, 6), pady=6)
+            swatch.pack_propagate(False)
             if wire["from_component_id"] == component_id:
                 other_name = comp_names.get(wire["to_component_id"], "?")
-                desc = f"\u2192 {other_name}  {wire['current_amps']}A  {wire['run_length_ft']}ft"
+                wire_desc = f"\u2192 {other_name}  {wire['current_amps']}A  {wire['run_length_ft']}ft"
             else:
                 other_name = comp_names.get(wire["from_component_id"], "?")
-                desc = f"\u2190 {other_name}  {wire['current_amps']}A  {wire['run_length_ft']}ft"
-            self._overlay_items.append(self.create_text(
-                panel_x + 34, text_y, text=desc, fill=COLOR_TEXT_MUTED,
-                font=wire_font, anchor="w", tags="detail_panel",
-            ))
-            text_y += 20
+                wire_desc = f"\u2190 {other_name}  {wire['current_amps']}A  {wire['run_length_ft']}ft"
+            tk.Label(
+                wire_row, text=wire_desc, fg=COLOR_TEXT_MUTED,
+                bg=COLOR_CARD_BG, font=wire_font, anchor="w",
+            ).pack(side=tk.LEFT)
 
     def _show_circuit_panel(
         self, circuit_nodes: set[str], circuit_wires: set[str],
     ) -> None:
-        """Floating panel showing the full traced circuit path with every hop."""
+        """Floating tk.Frame overlay showing the full traced circuit path."""
+        self._destroy_detail_panel()
         comp_names = {c["component_id"]: c["component_name"] for c in self._component_data}
 
         title_font = tkfont.Font(family="Segoe UI", size=11, weight="bold")
@@ -1509,83 +1566,76 @@ class DiagramCanvas(tk.Canvas):
         peak_amps = max((c["current_amps"] for c in circuit_wire_list), default=0)
         total_length = sum(c["run_length_ft"] for c in circuit_wire_list)
 
-        panel_width = 340
-        panel_x = self.canvasx(self.winfo_width() - panel_width - 16)
-        panel_y = self.canvasy(12)
-        panel_height = 50 + 5 * 20 + len(circuit_wire_list) * 22
+        # Outer frame placed at top-right of canvas
+        self._detail_frame = tk.Frame(
+            self, bg=COLOR_CARD_BG,
+            highlightbackground=COLOR_BORDER, highlightthickness=1,
+        )
+        self._detail_frame.place(relx=1.0, x=-12, y=8, anchor="ne", width=360)
 
-        self._draw_panel_bg(panel_x, panel_y, panel_width, panel_height)
+        inner = tk.Frame(self._detail_frame, bg=COLOR_CARD_BG, padx=12, pady=10)
+        inner.pack(fill=tk.BOTH, expand=True)
 
-        # Header accent
-        self._overlay_items.append(self.create_rectangle(
-            panel_x + 10, panel_y + 8, panel_x + 14, panel_y + 28,
-            fill=COLOR_ACCENT, outline=COLOR_ACCENT, tags="detail_panel",
-        ))
-        text_y = panel_y + 18
-        self._overlay_items.append(self.create_text(
-            panel_x + 20, text_y, text="\u26a1 Circuit Trace",
-            fill=COLOR_TEXT, font=title_font, anchor="w", tags="detail_panel",
-        ))
-        self._overlay_items.append(self.create_text(
-            panel_x + panel_width - 14, panel_y + 14, text="\u2715",
-            fill=COLOR_TEXT_MUTED, font=label_font, anchor="e", tags="detail_panel",
-        ))
+        # Header row
+        header_row = tk.Frame(inner, bg=COLOR_CARD_BG)
+        header_row.pack(fill=tk.X, pady=(0, 8))
+        tk.Frame(header_row, bg=COLOR_ACCENT, width=4, height=22).pack(side=tk.LEFT, padx=(0, 8))
+        tk.Label(
+            header_row, text="\u26a1 Circuit Trace", fg=COLOR_TEXT,
+            bg=COLOR_CARD_BG, font=title_font, anchor="w",
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+        close_label = tk.Label(
+            header_row, text="\u2715", fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CARD_BG, font=label_font, cursor="hand2",
+        )
+        close_label.pack(side=tk.RIGHT)
+        close_label.bind("<Button-1>", lambda _event: self._clear_overlays())
 
-        text_y += 28
-        for label_text, value_text in [
+        # Summary rows
+        for detail_label, detail_value in [
             ("Modules", str(len(circuit_nodes))),
             ("Wires", str(len(circuit_wires))),
             ("Peak current", f"{peak_amps} A"),
             ("Total length", f"{total_length:.1f} ft"),
         ]:
-            self._overlay_items.append(self.create_text(
-                panel_x + 14, text_y, text=f"{label_text}:",
-                fill=COLOR_TEXT_MUTED, font=label_font, anchor="w", tags="detail_panel",
-            ))
-            self._overlay_items.append(self.create_text(
-                panel_x + 120, text_y, text=value_text,
-                fill=COLOR_TEXT, font=value_font, anchor="w", tags="detail_panel",
-            ))
-            text_y += 20
+            row = tk.Frame(inner, bg=COLOR_CARD_BG)
+            row.pack(fill=tk.X, pady=1)
+            tk.Label(
+                row, text=f"{detail_label}:", fg=COLOR_TEXT_MUTED,
+                bg=COLOR_CARD_BG, font=label_font, width=14, anchor="w",
+            ).pack(side=tk.LEFT)
+            tk.Label(
+                row, text=detail_value, fg=COLOR_TEXT,
+                bg=COLOR_CARD_BG, font=value_font, anchor="w",
+            ).pack(side=tk.LEFT)
 
-        text_y += 6
-        self._overlay_items.append(self.create_line(
-            panel_x + 10, text_y - 4, panel_x + panel_width - 10, text_y - 4,
-            fill=COLOR_BORDER, tags="detail_panel",
-        ))
-        self._overlay_items.append(self.create_text(
-            panel_x + 14, text_y, text="CIRCUIT PATH", fill=COLOR_TEXT,
-            font=label_font, anchor="w", tags="detail_panel",
-        ))
-        text_y += 22
+        # Separator
+        tk.Frame(inner, bg=COLOR_BORDER, height=1).pack(fill=tk.X, pady=8)
+
+        tk.Label(
+            inner, text=f"CIRCUIT PATH ({len(circuit_wire_list)} hops)", fg=COLOR_TEXT,
+            bg=COLOR_CARD_BG, font=label_font, anchor="w",
+        ).pack(fill=tk.X, pady=(0, 4))
+
+        # Scrollable wire list (for large circuits)
+        list_frame = tk.Frame(inner, bg=COLOR_CARD_BG)
+        list_frame.pack(fill=tk.BOTH, expand=True)
 
         for wire in circuit_wire_list:
             wire_hex = WIRE_HEX_MAP.get(wire.get("wire_color", "red"), COLOR_ACCENT)
             from_name = comp_names.get(wire["from_component_id"], "?")
             to_name = comp_names.get(wire["to_component_id"], "?")
 
-            self._overlay_items.append(self.create_line(
-                panel_x + 14, text_y, panel_x + 28, text_y,
-                fill=wire_hex, width=3, tags="detail_panel",
-            ))
-            desc = f"{from_name} \u2192 {to_name}  [{wire['from_pin']}\u2192{wire['to_pin']}]"
-            self._overlay_items.append(self.create_text(
-                panel_x + 34, text_y, text=desc, fill=COLOR_TEXT_MUTED,
-                font=wire_font, anchor="w", tags="detail_panel",
-            ))
-            text_y += 22
-
-    def _draw_panel_bg(self, panel_x: float, panel_y: float, panel_width: int, panel_height: int) -> None:
-        """Draw shadow + background for a floating detail panel."""
-        self._overlay_items.append(self._smooth_rect(
-            panel_x + 3, panel_y + 3,
-            panel_x + panel_width + 3, panel_y + panel_height + 3,
-            radius=10, fill=SHADOW_COLOR, outline=SHADOW_COLOR, tags="detail_panel",
-        ))
-        self._overlay_items.append(self._smooth_rect(
-            panel_x, panel_y, panel_x + panel_width, panel_y + panel_height,
-            radius=10, fill=COLOR_CARD_BG, outline=COLOR_BORDER, tags="detail_panel",
-        ))
+            wire_row = tk.Frame(list_frame, bg=COLOR_CARD_BG)
+            wire_row.pack(fill=tk.X, pady=1)
+            swatch = tk.Frame(wire_row, bg=wire_hex, width=16, height=3)
+            swatch.pack(side=tk.LEFT, padx=(0, 6), pady=6)
+            swatch.pack_propagate(False)
+            wire_desc = f"{from_name} \u2192 {to_name}  [{wire['from_pin']}\u2192{wire['to_pin']}]"
+            tk.Label(
+                wire_row, text=wire_desc, fg=COLOR_TEXT_MUTED,
+                bg=COLOR_CARD_BG, font=wire_font, anchor="w",
+            ).pack(side=tk.LEFT)
 
     # ── Interaction ───────────────────────────────────────────────────────
 
@@ -1595,12 +1645,6 @@ class DiagramCanvas(tk.Canvas):
         canvas_x = self.canvasx(event.x)
         canvas_y = self.canvasy(event.y)
         hits = self.find_overlapping(canvas_x - 3, canvas_y - 3, canvas_x + 3, canvas_y + 3)
-
-        # Click on detail panel dismisses it
-        for item in hits:
-            if "detail_panel" in self.gettags(item):
-                self._clear_overlays()
-                return
 
         # Click on a wire triggers full circuit trace
         for item in hits:

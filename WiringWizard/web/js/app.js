@@ -11,7 +11,8 @@ import {
 } from './diagram.js';
 
 import {
-  initLibraryUI, openAddFromLibrary, openAiWireModal, openEditModal as openLibraryEditModal
+  initLibraryUI, openAddFromLibrary, openAiWireModal, openEditModal as openLibraryEditModal,
+  checkForAppUpdates
 } from './library.js';
 
 // Pin-type color map for inspector display (mirrors PIN_TYPE_COLORS in diagram.js)
@@ -54,6 +55,9 @@ async function initializeApp() {
   await loadDraftIfAvailable();
 
   setStatus('Ready');
+
+  // Non-blocking update check — runs after UI is ready
+  checkForAppUpdates();
 }
 
 // Eel is loaded as a regular script — access via window.eel from ES modules

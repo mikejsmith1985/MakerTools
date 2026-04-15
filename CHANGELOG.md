@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] — 2025-06-13
+
+### Added
+- **WiringWizard — Image/Schematic Upload**: upload PNG, JPEG, GIF, or WebP images of datasheets, schematics, or pinout tables and AI vision (GPT-4o) extracts pin definitions automatically. 10 MB file size limit.
+- **WiringWizard — Bulk Library Builder**: paste a documentation URL and click "📦 Bulk Build" to deep-crawl the site and have AI identify up to 20 distinct components with their pinouts in one pass. Select which ones to save from a grid of cards.
+- **WiringWizard — Auto-Update Checker**: on launch, the app checks GitHub for newer releases and shows a non-intrusive banner with a direct download link when an update is available.
+
+### Fixed
+- **WiringWizard — Eel Bridge Reliability**: added explicit `const eel = window.eel` in library.js and comprehensive debug logging to resolve intermittent "nothing happens" button issues in packaged exe builds.
+
+## [2.1.0]
+
 ### Added
 - **WiringWizard — URL-to-Library Deep Crawl**: paste a documentation URL into the library editor and click "🌐 Fetch & Parse" to deep-crawl the page and linked sub-pages (up to 3 levels, 15 pages). Prioritises pages with pin/wiring tables, then sends extracted text to AI for structured pin parsing.
 - **WiringWizard — Auto-Search (Experimental)**: click "🔍 Auto-Search" in the library editor to have WiringWizard search the web for a component's pinout/datasheet by name. Searches DuckDuckGo with pin-focused queries, crawls top results, and feeds them to AI. Works best with specific part numbers. Marked experimental — results vary.

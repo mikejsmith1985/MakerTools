@@ -472,6 +472,61 @@ def _register_eel_endpoints() -> None:
         except Exception as gen_error:
             return {"error": str(gen_error)}
 
+    @_eel.expose
+    def ai_parse_image(
+        component_name: str, image_base64: str, image_mime_type: str,
+        token_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Use AI vision to extract pin data from a schematic or datasheet image."""
+        try:
+            from core.ai_intake import parse_component_from_image, resolve_api_token
+            resolved_token = (
+                (token_override or "").strip()
+                or get_saved_gui_api_token()
+                or resolve_api_token()
+            )
+            if not resolved_token:
+                return {"error": "No API token available. Set one in Settings."}
+
+            parsed_result = parse_component_from_image(
+                component_name, image_base64, image_mime_type, resolved_token
+            )
+            if parsed_result is None:
+                return {"error": "AI could not extract pins from this image. Try a clearer image or paste text instead."}
+
+            return {"parsed": parsed_result}
+        except Exception as image_parse_error:
+            return {"error": str(image_parse_error)}
+
+    @_eel.expose
+    def ai_bulk_build_library(
+        documentation_url: str, token_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Crawl a docs URL and identify multiple components for bulk library import."""
+        try:
+            from core.ai_intake import bulk_identify_components, resolve_api_token
+            resolved_token = (
+                (token_override or "").strip()
+                or get_saved_gui_api_token()
+                or resolve_api_token()
+            )
+            if not resolved_token:
+                return {"error": "No API token available. Set one in Settings."}
+
+            result = bulk_identify_components(documentation_url, resolved_token)
+            return result
+        except Exception as bulk_error:
+            return {"error": str(bulk_error)}
+
+    @_eel.expose
+    def check_for_updates() -> Dict[str, Any]:
+        """Check GitHub releases for a newer version of WiringWizard."""
+        try:
+            from core.updater import check_latest_release
+            return check_latest_release()
+        except Exception as update_error:
+            return {"error": str(update_error)}
+
 
 # ── Application Entry Point ──────────────────────────────────────────────────
 

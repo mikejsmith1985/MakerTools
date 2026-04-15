@@ -1,0 +1,115 @@
+[
+  {
+    "library_id": "generic-12v-battery",
+    "name": "12V Battery",
+    "component_type": "battery",
+    "pins": [
+      {"pin_id": "POS", "name": "Positive", "pin_type": "power_output", "description": "12V positive terminal"},
+      {"pin_id": "NEG", "name": "Negative", "pin_type": "ground", "description": "Negative / chassis ground terminal"}
+    ],
+    "manufacturer": "",
+    "part_number": "",
+    "voltage_nominal": 12.0,
+    "current_draw_amps": 0.0,
+    "notes": "Standard 12V automotive or deep-cycle lead-acid battery.",
+    "user_notes": "",
+    "source_urls": [],
+    "is_verified": true,
+    "created_at": "2026-04-15",
+    "updated_at": "2026-04-15"
+  },
+  {
+    "library_id": "generic-fuse-box-6way",
+    "name": "6-Way Fuse Box",
+    "component_type": "fuse_box",
+    "pins": [
+      {"pin_id": "IN", "name": "Battery Input", "pin_type": "power_input", "description": "Main 12V feed from battery"},
+      {"pin_id": "GND", "name": "Ground", "pin_type": "ground", "description": "Fuse box ground bus"},
+      {"pin_id": "F1", "name": "Fuse 1 Output", "pin_type": "power_output", "description": "Fused output circuit 1"},
+      {"pin_id": "F2", "name": "Fuse 2 Output", "pin_type": "power_output", "description": "Fused output circuit 2"},
+      {"pin_id": "F3", "name": "Fuse 3 Output", "pin_type": "power_output", "description": "Fused output circuit 3"},
+      {"pin_id": "F4", "name": "Fuse 4 Output", "pin_type": "power_output", "description": "Fused output circuit 4"},
+      {"pin_id": "F5", "name": "Fuse 5 Output", "pin_type": "power_output", "description": "Fused output circuit 5"},
+      {"pin_id": "F6", "name": "Fuse 6 Output", "pin_type": "power_output", "description": "Fused output circuit 6"}
+    ],
+    "manufacturer": "",
+    "part_number": "",
+    "voltage_nominal": 12.0,
+    "current_draw_amps": 0.0,
+    "notes": "Generic 6-circuit fuse box with blade fuses. Add or rename outputs to match your actual fuse box.",
+    "user_notes": "",
+    "source_urls": [],
+    "is_verified": true,
+    "created_at": "2026-04-15",
+    "updated_at": "2026-04-15"
+  },
+  {
+    "library_id": "generic-ground-bus",
+    "name": "Ground Bus Bar",
+    "component_type": "ground_bus",
+    "pins": [
+      {"pin_id": "CHASSIS", "name": "Chassis Ground", "pin_type": "ground", "description": "Connection to vehicle chassis or earth ground"},
+      {"pin_id": "G1", "name": "Ground 1", "pin_type": "ground", "description": "Ground distribution point 1"},
+      {"pin_id": "G2", "name": "Ground 2", "pin_type": "ground", "description": "Ground distribution point 2"},
+      {"pin_id": "G3", "name": "Ground 3", "pin_type": "ground", "description": "Ground distribution point 3"},
+      {"pin_id": "G4", "name": "Ground 4", "pin_type": "ground", "description": "Ground distribution point 4"},
+      {"pin_id": "G5", "name": "Ground 5", "pin_type": "ground", "description": "Ground distribution point 5"},
+      {"pin_id": "G6", "name": "Ground 6", "pin_type": "ground", "description": "Ground distribution point 6"},
+      {"pin_id": "G7", "name": "Ground 7", "pin_type": "ground", "description": "Ground distribution point 7"},
+      {"pin_id": "G8", "name": "Ground 8", "pin_type": "ground", "description": "Ground distribution point 8"}
+    ],
+    "manufacturer": "",
+    "part_number": "",
+    "voltage_nominal": 0.0,
+    "current_draw_amps": 0.0,
+    "notes": "Central ground distribution point. All component grounds should terminate here, with a single heavy-gauge run to the battery negative.",
+    "user_notes": "",
+    "source_urls": [],
+    "is_verified": true,
+    "created_at": "2026-04-15",
+    "updated_at": "2026-04-15"
+  },
+  {
+    "library_id": "generic-ignition-switch",
+    "name": "Ignition Switch",
+    "component_type": "ignition_switch",
+    "pins": [
+      {"pin_id": "BATT", "name": "Battery", "pin_type": "power_input", "description": "Constant 12V from battery via fuse"},
+      {"pin_id": "ACC", "name": "Accessory", "pin_type": "switched_power", "description": "12V in ACC and RUN positions"},
+      {"pin_id": "IGN", "name": "Ignition", "pin_type": "switched_power", "description": "12V in RUN and START positions"},
+      {"pin_id": "START", "name": "Starter", "pin_type": "switched_power", "description": "12V in START position only (momentary)"}
+    ],
+    "manufacturer": "",
+    "part_number": "",
+    "voltage_nominal": 12.0,
+    "current_draw_amps": 0.0,
+    "notes": "Standard 4-position automotive ignition switch: OFF, ACC, RUN, START.",
+    "user_notes": "",
+    "source_urls": [],
+    "is_verified": true,
+    "created_at": "2026-04-15",
+    "updated_at": "2026-04-15"
+  },
+  {
+    "library_id": "generic-relay-spdt",
+    "name": "SPDT Relay (5-Pin)",
+    "component_type": "relay",
+    "pins": [
+      {"pin_id": "85", "name": "Coil -", "pin_type": "ground", "description": "Relay coil ground"},
+      {"pin_id": "86", "name": "Coil +", "pin_type": "signal_input", "description": "Relay coil trigger (12V to energise)"},
+      {"pin_id": "30", "name": "Common", "pin_type": "power_input", "description": "Common terminal (usually from fused 12V)"},
+      {"pin_id": "87", "name": "Normally Open", "pin_type": "power_output", "description": "Output when relay is energised"},
+      {"pin_id": "87a", "name": "Normally Closed", "pin_type": "power_output", "description": "Output when relay is de-energised"}
+    ],
+    "manufacturer": "",
+    "part_number": "",
+    "voltage_nominal": 12.0,
+    "current_draw_amps": 0.15,
+    "notes": "Standard automotive 5-pin SPDT relay (Bosch-style). Pin 30 is common, 87 is NO, 87a is NC.",
+    "user_notes": "",
+    "source_urls": [],
+    "is_verified": true,
+    "created_at": "2026-04-15",
+    "updated_at": "2026-04-15"
+  }
+]

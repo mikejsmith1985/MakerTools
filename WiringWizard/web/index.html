@@ -25,8 +25,14 @@
       <button class="toolbar-btn primary" id="btn-ai-assist" title="AI Draft from Brief">
         <span class="icon">🤖</span> AI Assist
       </button>
+      <button class="toolbar-btn" id="btn-library" title="Component Library">
+        <span class="icon">📚</span> Library
+      </button>
       <button class="toolbar-btn" id="btn-generate" title="Generate Wiring Plan">
         <span class="icon">📋</span> Generate Plan
+      </button>
+      <button class="toolbar-btn" id="btn-ai-wire" title="AI Wire Components">
+        <span class="icon">⚡</span> AI Wire
       </button>
       <button class="toolbar-btn" id="btn-remap" title="Apply Changes">
         <span class="icon">🔄</span> Re-map
@@ -67,7 +73,10 @@
 
       <div class="sidebar-header">
         <span class="sidebar-title" id="sidebar-title">Components</span>
-        <button class="sidebar-action-btn" id="btn-add-item" title="Add Component">＋</button>
+        <div style="display:flex;gap:4px;">
+          <button class="sidebar-action-btn" id="btn-add-from-library" title="Add from Library">📚</button>
+          <button class="sidebar-action-btn" id="btn-add-item" title="Add Component">＋</button>
+        </div>
       </div>
 
       <div class="sidebar-tree" id="sidebar-tree">
@@ -535,9 +544,178 @@
     </div>
   </div>
 
+  <!-- ── Component Library Modal ─────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-library" hidden>
+    <div class="modal-panel modal-wide">
+      <div class="modal-header">
+        <h2>📚 Component Library</h2>
+        <button class="modal-close" data-close-modal="modal-library">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="library-toolbar">
+          <input type="text" id="library-search" class="input-field" placeholder="Search components..." />
+          <select id="library-type-filter" class="input-field input-select">
+            <option value="">All Types</option>
+          </select>
+          <button class="btn-primary" id="btn-library-add-new">＋ Add New</button>
+        </div>
+        <div class="library-grid" id="library-grid">
+          <div class="tree-empty">Loading library...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-library">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Add/Edit Library Component Modal ──────────────────────────────── -->
+  <div class="modal-overlay" id="modal-library-edit" hidden>
+    <div class="modal-panel modal-wide">
+      <div class="modal-header">
+        <h2 id="library-edit-title">Add Component to Library</h2>
+        <button class="modal-close" data-close-modal="modal-library-edit">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="lib-name">Component Name</label>
+            <input type="text" id="lib-name" class="input-field" placeholder="e.g. Emtron KV8 ECU" />
+          </div>
+          <div class="form-group">
+            <label for="lib-type">Type</label>
+            <select id="lib-type" class="input-field input-select">
+              <option value="ecu">ECU</option>
+              <option value="sensor">Sensor</option>
+              <option value="actuator">Actuator</option>
+              <option value="relay">Relay</option>
+              <option value="fuse_box">Fuse Box</option>
+              <option value="display">Display</option>
+              <option value="switch">Switch</option>
+              <option value="motor">Motor</option>
+              <option value="solenoid">Solenoid</option>
+              <option value="light">Light</option>
+              <option value="battery">Battery</option>
+              <option value="power_supply">Power Supply</option>
+              <option value="ground_bus">Ground Bus</option>
+              <option value="ignition_switch">Ignition Switch</option>
+              <option value="microcontroller">Microcontroller</option>
+              <option value="connector">Connector</option>
+              <option value="general">General</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="lib-manufacturer">Manufacturer</label>
+            <input type="text" id="lib-manufacturer" class="input-field" placeholder="e.g. Emtron" />
+          </div>
+          <div class="form-group">
+            <label for="lib-part-number">Part Number</label>
+            <input type="text" id="lib-part-number" class="input-field" placeholder="e.g. KV8" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="lib-voltage">Voltage (V)</label>
+            <input type="number" id="lib-voltage" class="input-field" value="12" step="0.1" />
+          </div>
+          <div class="form-group">
+            <label for="lib-current">Current Draw (A)</label>
+            <input type="number" id="lib-current" class="input-field" value="0" step="0.1" />
+          </div>
+        </div>
+
+        <!-- AI-assisted data entry -->
+        <div class="form-section">
+          <label for="lib-raw-data">Paste datasheet/manual text (AI will extract pins)</label>
+          <textarea id="lib-raw-data" class="input-field input-textarea" rows="5"
+            placeholder="Paste pinout from a datasheet, manual, or product page... e.g.&#10;Pin A1: B+ (12V power)&#10;Pin A2: PGND (power ground)&#10;Pin B1: CAN-H&#10;Pin B2: CAN-L"></textarea>
+          <button class="btn-accent" id="btn-ai-parse-pins">🤖 Parse Pins with AI</button>
+        </div>
+
+        <!-- Pin table -->
+        <div class="form-section">
+          <div class="pin-table-header">
+            <label>Pin Definitions</label>
+            <button class="btn-sm" id="btn-add-pin-row">＋ Add Pin</button>
+          </div>
+          <div class="pin-table-scroll">
+            <table class="pin-table" id="pin-table">
+              <thead>
+                <tr>
+                  <th>Pin ID</th>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th>Description</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="pin-table-body">
+                <!-- Pin rows added dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label for="lib-notes">Notes</label>
+            <textarea id="lib-notes" class="input-field input-textarea" rows="2"
+              placeholder="Technical notes, source references..."></textarea>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-library-edit">Cancel</button>
+        <button class="btn-primary" id="btn-save-library-component">Save to Library</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Add from Library to Project Modal ─────────────────────────────── -->
+  <div class="modal-overlay" id="modal-add-from-library" hidden>
+    <div class="modal-panel modal-wide">
+      <div class="modal-header">
+        <h2>Add Component from Library</h2>
+        <button class="modal-close" data-close-modal="modal-add-from-library">✕</button>
+      </div>
+      <div class="modal-body">
+        <input type="text" id="add-from-lib-search" class="input-field" placeholder="Search library..." />
+        <div class="library-grid" id="add-from-lib-grid">
+          <div class="tree-empty">Loading...</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-add-from-library">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── AI Wire Components Modal ──────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-ai-wire" hidden>
+    <div class="modal-panel">
+      <div class="modal-header">
+        <h2>🤖 AI Wire Components</h2>
+        <button class="modal-close" data-close-modal="modal-ai-wire">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Your project has <strong id="ai-wire-comp-count">0</strong> components with verified pins. Describe what you want wired and AI will generate the connections.</p>
+        <label for="ai-wire-goal">Wiring Goal</label>
+        <textarea id="ai-wire-goal" class="input-field input-textarea" rows="5"
+          placeholder="e.g. Wire the KV8 ECU to all engine sensors, connect CAN bus to dash and keypad, route all grounds to the ground bus..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-ai-wire">Cancel</button>
+        <button class="btn-primary" id="btn-ai-wire-generate">⚡ Generate Connections</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Scripts ────────────────────────────────────────────────────────── -->
   <script type="text/javascript" src="/eel.js"></script>
   <script type="module" src="js/diagram.js"></script>
+  <script type="module" src="js/library.js"></script>
   <script type="module" src="js/app.js"></script>
 </body>
 </html>

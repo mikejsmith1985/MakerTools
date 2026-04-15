@@ -3,6 +3,7 @@ AI-assisted intake module for WiringWizard — converts a free-text project brie
 structured component/connection draft suitable for populating the WiringWizard UI.
 """
 
+import datetime as _dt
 import html
 import json
 import os
@@ -37,6 +38,18 @@ TOKEN_ENV_VARS: Tuple[str, ...] = (
 APP_DIR = resolve_runtime_app_dir(__file__, source_parent_levels=1)
 DATA_DIR = os.path.join(APP_DIR, "data")
 AI_SETTINGS_FILE_PATH = os.path.join(DATA_DIR, "ai_settings.json")
+_LOG_FILE_PATH = os.path.join(DATA_DIR, "ai_debug.log")
+
+
+def _log(message: str) -> None:
+    """Append a timestamped debug line to the AI debug log file."""
+    try:
+        os.makedirs(os.path.dirname(_LOG_FILE_PATH), exist_ok=True)
+        timestamp = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(_LOG_FILE_PATH, "a", encoding="utf-8") as log_handle:
+            log_handle.write(f"[{timestamp}] {message}\n")
+    except OSError:
+        pass
 
 
 def resolve_api_token() -> Optional[str]:
@@ -195,6 +208,12 @@ REFERENCE_MAX_URLS = 8
 REFERENCE_MAX_LINKS_PER_PAGE = 6
 REFERENCE_MAX_DESCRIPTION_CHARS = 500
 
+# Pattern for JSON-LD structured data embedded in HTML (used by Shopify and others).
+_JSON_LD_PATTERN = re.compile(
+    r'<script[^>]+type\s*=\s*["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.IGNORECASE | re.DOTALL,
+)
+
 # Component types that supply power to the rest of the circuit.
 POWER_SOURCE_TYPES = frozenset({"battery", "power_supply"})
 
@@ -205,157 +224,144 @@ POWER_LOAD_TYPES = frozenset({
 })
 
 # ── AI Prompt Templates ───────────────────────────────────────────────────────
+# Two-stage pipeline: Stage 1 decomposes components, Stage 2 generates connections.
+# Splitting the task dramatically improves output quality because each stage has
+# a focused, achievable goal instead of trying to do everything at once.
 
-_AI_SYSTEM_PROMPT = (
-    "You are an expert electronics and automotive wiring engineer assistant. "
-    "Given a free-text project brief, you produce a structured wiring project draft as JSON. "
-    "Your output MUST be a single valid JSON object and nothing else — no markdown fences, no prose. "
-    "Component IDs must be simple snake_case identifiers (e.g. battery1, ecu1, fuse_box1). "
-    "Preserve the user's named products and modules as component_name values whenever possible. "
-    "If reference material is supplied, use it to identify modules, dashboards, keypads, harnesses, manuals, and pinouts.\n\n"
+# ── Stage 1: Component Decomposition ──────────────────────────────────────────
 
-    "AUTOMOTIVE POWER DISTRIBUTION:\n"
-    "Model realistic power distribution: Battery positive → main fuse → ignition switch → fuse box → relays → loads. "
-    "Not every load connects directly to the battery. "
-    "Always-hot circuits (clock, alarm, ECU keep-alive) tap before the ignition switch. "
-    "Ignition-ON circuits (ECU main, fuel pump, sensors) tap after the ignition switch in the RUN position. "
-    "Accessory circuits (radio, USB, interior lights) tap from the ACC position.\n\n"
+_STAGE1_SYSTEM_PROMPT = (
+    "You are an expert automotive and electronics wiring engineer. "
+    "Your ONLY task is to identify and list ALL individual electrical components "
+    "from the user's project brief. Output ONLY a JSON array of component objects — "
+    "no markdown fences, no prose, no wrapper object.\n\n"
 
-    "GROUND CONNECTIONS ARE MANDATORY:\n"
-    "Every component MUST have a ground return path — either to a chassis ground point or a ground bus bar. "
-    "Never omit ground wires. Use dedicated ground wires; do not assume chassis return unless the user specifies it. "
-    "Ground connections use circuit_type 'ground'.\n\n"
+    "CRITICAL RULES:\n"
+    "1. A wiring harness is NOT a component — it is wires. NEVER list a harness as a "
+    "component. Decompose it into every sensor, injector, coil, actuator it serves.\n"
+    "2. List each injector INDIVIDUALLY: Injector #1, Injector #2, #3, #4 — "
+    "NOT 'Fuel Injectors' as one item.\n"
+    "3. List cam sensor and crank sensor as SEPARATE components — not 'Cam and Crank Sensors'.\n"
+    "4. ALWAYS include infrastructure: battery, ignition_switch, ground_bus, fuse_box.\n"
+    "5. Add CAN termination resistors (120 ohm) at each end of any CAN bus.\n"
+    "6. Add relays for high-current loads (>5A): fuel pump relay, fan relay, etc.\n"
+    "7. Add individual fuses for each major circuit.\n"
+    "8. If user says component X handles role Y (e.g. 'KV8 handles transmission'), "
+    "do NOT add a separate controller for role Y.\n"
+    "9. If user says to REMOVE or EXCLUDE something, do NOT include it.\n"
+    "10. Read for INTENT: 'I still have X' or 'I previously used X' followed by "
+    "'but I want to use Y instead' means DO NOT include X — include Y.\n"
+    "11. Use reference material to determine real pin names and counts.\n\n"
 
-    "FUSE PROTECTION:\n"
-    "Every power circuit MUST include an appropriately sized fuse. "
-    "Fuse rating should be approximately 125-150% of the circuit's maximum expected current draw. "
-    "Include the fuse as a component and wire it in-line on the power feed to each load or load group.\n\n"
+    "COMPONENT FORMAT (each object):\n"
+    "{\n"
+    '  "component_id": "snake_case_id",\n'
+    '  "component_name": "Human-Readable Name",\n'
+    '  "component_type": "battery|power_supply|ecu|relay|fuse|fuse_box|ground_bus|'
+    'termination_resistor|ignition_switch|sensor|switch|display|solenoid|motor|fan|light|pump",\n'
+    '  "current_draw_amps": number,\n'
+    '  "position_label": "Engine Bay|Firewall|Dash|Transmission|Intake Manifold|Exhaust|etc.",\n'
+    '  "pins": ["pin1_name", "pin2_name", ...]\n'
+    "}\n\n"
 
-    "RELAY-CONTROLLED LOADS:\n"
-    "High-current loads drawing more than 5 amps (headlights, cooling fans, fuel pump, starter, horns) "
-    "MUST be switched through a relay. Wire the relay coil from the control source (switch, ECU output) "
-    "and the relay contacts on the high-current path from fused power to the load.\n\n"
+    "EXAMPLE for a 4-cylinder engine project (abbreviated):\n"
+    "[\n"
+    '  {"component_id":"battery1","component_name":"Battery","component_type":"battery",'
+    '"current_draw_amps":0,"position_label":"Engine Bay","pins":["POS","NEG"]},\n'
+    '  {"component_id":"main_fuse1","component_name":"Main Fuse 80A","component_type":"fuse",'
+    '"current_draw_amps":0,"position_label":"Engine Bay","pins":["IN","OUT"]},\n'
+    '  {"component_id":"ignition_switch1","component_name":"Ignition Switch","component_type":"ignition_switch",'
+    '"current_draw_amps":0.5,"position_label":"Dash","pins":["BATT","ACC","IGN","START"]},\n'
+    '  {"component_id":"fuse_box1","component_name":"Fuse Box","component_type":"fuse_box",'
+    '"current_draw_amps":0,"position_label":"Engine Bay","pins":["MAIN_IN","IGN_IN","F1","F2","F3","F4","F5","F6","F7","F8"]},\n'
+    '  {"component_id":"ground_bus1","component_name":"Chassis Ground Bus","component_type":"ground_bus",'
+    '"current_draw_amps":0,"position_label":"Engine Bay","pins":["CHASSIS","G1","G2","G3","G4","G5","G6","G7","G8","G9","G10"]},\n'
+    '  {"component_id":"ecu1","component_name":"Standalone ECU","component_type":"ecu",'
+    '"current_draw_amps":3,"position_label":"Firewall","pins":["B+","PGND","SGND","INJ1","INJ2","INJ3","INJ4","IGN1","IGN2","IGN3","IGN4","CAM","CKP","MAP","IAT","CLT","TPS","WBO2_IN","AN1","AN2","DI1","DI2","CAN_H","CAN_L"]},\n'
+    '  {"component_id":"injector1","component_name":"Injector #1","component_type":"solenoid",'
+    '"current_draw_amps":1,"position_label":"Cyl 1","pins":["B+","SIG"]},\n'
+    '  {"component_id":"injector2","component_name":"Injector #2","component_type":"solenoid",'
+    '"current_draw_amps":1,"position_label":"Cyl 2","pins":["B+","SIG"]},\n'
+    '  {"component_id":"cam_sensor1","component_name":"Cam Angle Sensor","component_type":"sensor",'
+    '"current_draw_amps":0.02,"position_label":"Valve Cover","pins":["V+","GND","SIG"]},\n'
+    '  {"component_id":"crank_sensor1","component_name":"Crank Position Sensor","component_type":"sensor",'
+    '"current_draw_amps":0.02,"position_label":"Bellhousing","pins":["V+","GND","SIG"]},\n'
+    '  {"component_id":"can_term_1","component_name":"CAN Termination Resistor (ECU End)","component_type":"termination_resistor",'
+    '"current_draw_amps":0,"position_label":"ECU","pins":["CAN_H","CAN_L"]}\n'
+    "]"
+)
 
-    "CAN BUS WIRING:\n"
-    "When the project includes CAN bus devices (ECUs, dashboards, keypads, body controllers), "
-    "wire CAN-H and CAN-L as a daisy-chained bus between all CAN nodes. "
-    "Place 120-ohm termination resistors at each physical end of the bus. "
-    "Use circuit_type 'can_bus' for CAN-H and CAN-L connections. "
-    "CAN wires should be a twisted pair (typically CAN-H = YELLOW, CAN-L = GREEN or BLUE).\n\n"
+_STAGE1_USER_TEMPLATE = (
+    "Decompose this project brief into EVERY individual electrical component.\n\n"
+    "BRIEF:\n{brief_text}\n\n"
+    "{research_section}"
+    "Return a JSON ARRAY of component objects. Include EVERY individual part — "
+    "each injector separately, each sensor separately, each coil separately, "
+    "the ground bus, the ignition switch, fuses, relays for high-current loads, "
+    "CAN termination resistors, etc. Do NOT group items."
+)
 
-    "PIN-LEVEL CONNECTIONS:\n"
-    "Specify actual pin names or numbers whenever the component datasheet or reference material provides them "
-    "(e.g. 'ECU Pin A1', 'Relay Pin 87', 'Sensor Pin SIG'). "
-    "When pin information is unavailable, use descriptive functional labels "
-    "(e.g. 'V+', 'GND', 'SIG_OUT', 'CAN_H', 'CAN_L', 'COIL+', 'NO', 'NC', 'COM').\n\n"
+# ── Stage 2: Connection Generation ────────────────────────────────────────────
+
+_STAGE2_SYSTEM_PROMPT = (
+    "You are an expert automotive and electronics wiring engineer. "
+    "You are given a list of electrical components. Generate ALL wiring connections between them. "
+    "Output ONLY a JSON object with 'connections' array and 'notes' array — "
+    "no markdown, no prose.\n\n"
+
+    "EVERY project MUST have ALL of these connection types:\n"
+    "1. POWER: Battery → main fuse → ignition switch → fuse box → individual fuses → loads. "
+    "Loads get power through the fuse box, NOT directly from the battery.\n"
+    "2. GROUND: EVERY component MUST have a ground wire to the ground bus. "
+    "circuit_type='ground', wire_color='black'. No exceptions — if a component exists, "
+    "it has a ground wire.\n"
+    "3. SIGNAL: Sensor output pins → ECU input pins. "
+    "circuit_type='signal_analog' or 'signal_digital', wire_color='white' or 'pink'.\n"
+    "4. CONTROL: ECU output pins → injector SIG pins, coil SIG pins, relay coils. "
+    "circuit_type='signal_digital'.\n"
+    "5. CAN BUS: All CAN devices daisy-chained: CAN-H (yellow/green) and CAN-L (green). "
+    "circuit_type='can_bus'. Termination resistors at each end.\n\n"
+
+    "WIRE SIZING GUIDE:\n"
+    "22 AWG: sensor signals, CAN bus, low-current digital\n"
+    "18 AWG: injectors, ignition coils, small relays\n"
+    "16 AWG: ECU power, relay coils, small motors\n"
+    "14 AWG: headlights, fuel pump relay output, cooling fans\n"
+    "10 AWG: alternator charge wire, main power distribution\n"
+    "8 AWG or larger: battery to main fuse\n\n"
 
     "WIRE COLORS:\n"
-    "Use standard automotive wire color conventions: "
-    "RED = +12V always-hot, YELLOW = +12V ignition-switched, ORANGE = +12V accessory, "
-    "BLACK = ground, WHITE/BLACK = ground return, BLUE = headlights/high-beam, "
-    "GREEN = CAN-L or right-turn, YELLOW/GREEN = CAN-H, "
-    "PINK or WHITE = signal/sensor wires, BROWN = tail/parking lights. "
-    "For non-automotive projects, use RED = V+, BLACK = GND, and distinct colors per signal.\n\n"
+    "RED = +12V always-hot | YELLOW = +12V ignition-switched | ORANGE = +12V accessory\n"
+    "BLACK = ground | WHITE/PINK = sensor signal | BLUE = headlights\n"
+    "YELLOW/GREEN = CAN-H | GREEN = CAN-L\n\n"
 
-    "SIGNAL vs POWER WIRES:\n"
-    "Distinguish signal wires (low-current analog/digital sensor lines, communication buses) from power wires. "
-    "Signal wires are typically 20-22 AWG; power wires are sized for the load current. "
-    "Use wire_gauge_awg 'auto' when the system should calculate gauge from current and run length.\n\n"
+    "CONNECTION FORMAT:\n"
+    '{"connection_id":"conn_001","from_component_id":"id","from_pin":"PIN",'
+    '"to_component_id":"id","to_pin":"PIN","current_amps":number,'
+    '"run_length_ft":number,"wire_color":"color","wire_gauge_awg":"number",'
+    '"circuit_type":"power_always_on|power_ignition|power_accessory|ground|signal_analog|signal_digital|can_bus"}\n\n'
 
-    "HARNESS AND KIT DECOMPOSITION (CRITICAL):\n"
-    "A wiring harness, harness kit, or engine harness is NOT a single component — it is a bundle of wires "
-    "that connects MANY individual components. When the user mentions a harness (e.g. 'OHM Racing Engine Harness', "
-    "'mil-spec harness', 'fusebox harness'), do NOT list it as one component. Instead, decompose it into "
-    "EVERY individual component the harness connects:\n"
-    "  - For a typical 4-cylinder engine harness (e.g. 4g63, 4g64, 2JZ-GE, LS1): list each injector individually "
-    "(Injector #1, Injector #2, Injector #3, Injector #4), the cam angle sensor, the crank angle sensor, "
-    "the ignition coil pack or individual coils, the coolant temperature sensor, the intake air temperature sensor, "
-    "the manifold absolute pressure sensor or MAP sensor, the throttle position sensor or drive-by-wire throttle body, "
-    "the alternator, the wideband O2 sensor, the oil pressure sensor, the fuel pump relay, and any other sensors "
-    "the user specifies (flex fuel, fuel pressure, knock sensor, etc.).\n"
-    "  - For a fusebox/relay box harness: list the fuse box, each relay (fuel pump relay, fan relay, headlight relay, etc.), "
-    "the ignition switch input, the alternator charge wire, and all switched and always-on power distribution circuits.\n"
-    "  - A harness is infrastructure — the COMPONENTS it connects are what go in the diagram.\n"
-    "  - Wire each decomposed component with its power supply pin, ground pin, signal pins, and any CAN or data pins.\n\n"
-
-    "COMMON ENGINE KNOWLEDGE:\n"
-    "Use this domain knowledge when the user mentions these engines/platforms:\n"
-    "  4g63 (Mitsubishi Eclipse/Eagle Talon/Evo): 4 high-impedance fuel injectors, CAS (cam angle sensor) or "
-    "individual cam+crank sensors (97-99), coil pack (waste-spark), MAP sensor, IAT sensor, coolant temp sensor, "
-    "TPS or DBW throttle body, alternator, oil pressure switch. The 7-bolt (95-99 2G) uses a 97-99 cam and crank "
-    "trigger pattern. Denso high-impedance injectors are a common upgrade.\n"
-    "  W4A33 transmission: solenoid pack (shift solenoids A/B, TCC solenoid, pressure control solenoid), "
-    "input/output speed sensors, gear select switch, neutral safety switch, ATF temperature sensor.\n"
-    "  Emtron KV8: standalone ECU with 8 injector drivers, 8 ignition outputs, CAN bus, wideband controller input, "
-    "analog and digital inputs for sensors. Can control engine AND transmission when properly configured — "
-    "no separate TCU required if user says so. CAN bus connects to ED10M dash and CAN keypad.\n"
-    "  ED10M dash + 8-button CAN keypad: connects via CAN bus to ECU. Keypad buttons can be mapped to "
-    "functions (launch control, traction control, pit limiter, etc.). Both need +12V power, ground, CAN-H, CAN-L.\n\n"
-
-    "RESPECT USER COMPONENT CHOICES:\n"
-    "Do NOT add components the user did not request. "
-    "If the user says one component handles multiple roles (e.g. 'KV8 handles engine and transmission'), "
-    "do NOT add a separate controller for the handled role — do NOT add a TCU or SMART150. "
-    "If the user says to remove or exclude a component (e.g. 'remove knock sensor', 'no ABS', 'remove boost controller'), "
-    "do NOT include it. "
-    "Match the user's parts list exactly — only add required infrastructure "
-    "(fuses, relays, ground bus, termination resistors) that the user's build implicitly needs.\n\n"
-
-    "NON-AUTOMOTIVE PROJECTS:\n"
-    "For general electronics projects (CNC machines, 3D printers, home electrical, LED installations), "
-    "apply the same principles: proper power distribution from the supply through fusing to loads, "
-    "mandatory ground returns, relay control for high-current loads, and pin-level connections where known."
+    "OUTPUT FORMAT:\n"
+    '{"connections":[...],"notes":["tip1","tip2"]}'
 )
 
-_AI_USER_PROMPT_TEMPLATE = (
-    "Convert this project brief into a WiringWizard JSON draft.\n\n"
-    "BRIEF:\n{brief_text}\n\n"
-    "Return a JSON object with EXACTLY these fields:\n"
-    "{{\n"
-    '  "project_name": "string — short human-readable project name",\n'
-    '  "description": "string — one to two sentence summary of the project",\n'
-    '  "components": [\n'
-    "    {{\n"
-    '      "component_id": "snake_case_id",\n'
-    '      "component_name": "Human-Readable Name",\n'
-    '      "component_type": "battery|power_supply|microcontroller|ecu|relay|fuse|fuse_box|'
-    'ground_bus|termination_resistor|ignition_switch|'
-    'led_load|light|motor|servo|fan|pump|sensor|switch|display|buzzer|solenoid|stepper|motor_driver",\n'
-    '      "current_draw_amps": number,\n'
-    '      "position_label": "location or TBD",\n'
-    '      "pins": ["pin1_name", "pin2_name"]\n'
-    "    }}\n"
-    "  ],\n"
-    '  "connections": [\n'
-    "    {{\n"
-    '      "connection_id": "conn_001",\n'
-    '      "from_component_id": "source_id",\n'
-    '      "from_pin": "specific pin name/number",\n'
-    '      "to_component_id": "destination_id",\n'
-    '      "to_pin": "specific pin name/number",\n'
-    '      "current_amps": number,\n'
-    '      "run_length_ft": number,\n'
-    '      "wire_color": "color",\n'
-    '      "wire_gauge_awg": "number or auto",\n'
-    '      "circuit_type": "power_always_on|power_ignition|power_accessory|ground|signal_analog|signal_digital|can_bus|data"\n'
-    "    }}\n"
-    "  ],\n"
-    '  "notes": ["string warning or tip", "..."]\n'
-    "}}\n\n"
-    "MANDATORY RULES — every output MUST satisfy ALL of these:\n"
-    "1. EVERY component MUST have at least one ground connection (circuit_type 'ground') back to a ground bus or chassis ground point.\n"
-    "2. CAN bus devices MUST have CAN-H and CAN-L connections (circuit_type 'can_bus') with 120-ohm termination resistors at each end of the bus.\n"
-    "3. High-current loads drawing more than 5A MUST route through a relay — wire the relay coil from the control source and relay contacts on the power path.\n"
-    "4. Every power connection MUST pass through an appropriately sized fuse (125-150%% of max expected current).\n"
-    "5. Do NOT add components the user did not ask for — respect their parts list exactly. Only add essential infrastructure (fuses, relays, ground bus, termination resistors).\n"
-    "6. If the user says one component handles multiple roles (e.g. 'KV8 handles engine and transmission'), do NOT add a separate controller for the handled role.\n"
-    "7. Pin names MUST be as specific as possible — use actual datasheet pin names/numbers when reference material is available; otherwise use descriptive functional labels (V+, GND, SIG_OUT, CAN_H, CAN_L, COIL+, NO, COM).\n"
-    "8. Component IDs in connections MUST exactly match component_id values listed in the components array.\n"
-    "9. List each component's known or expected pins in the 'pins' array so the diagram is self-documenting.\n"
-    "10. NEVER list a wiring harness as a single component — ALWAYS decompose it into individual sensors, injectors, coils, actuators, and other components that the harness connects. A harness is wires, not a device.\n"
-    "11. Each individual injector, ignition coil, and sensor MUST be listed as its own component (e.g. Injector #1, Injector #2, Injector #3, Injector #4 — not just 'Fuel Injectors').\n"
-    "12. Use reference material and domain knowledge to determine realistic current draws, wire gauges, and run lengths — do NOT default everything to the same values."
+_STAGE2_USER_TEMPLATE = (
+    "Generate ALL wiring connections for these components.\n\n"
+    "COMPONENTS:\n{components_json}\n\n"
+    "PROJECT CONTEXT:\n{brief_summary}\n\n"
+    "RULES — violating any of these makes the output USELESS:\n"
+    "- EVERY component MUST have a ground wire to the ground bus (circuit_type='ground')\n"
+    "- EVERY sensor MUST have a signal wire to the ECU (circuit_type='signal_analog' or 'signal_digital')\n"
+    "- EVERY CAN device MUST have CAN_H and CAN_L connections (circuit_type='can_bus')\n"
+    "- Power flows: battery → main fuse → ignition switch → fuse box → loads\n"
+    "- High-current loads (>5A) go through relays\n"
+    "- Use the ACTUAL pin names from each component's pins array\n"
+    "- Generate a connection for EVERY component — no orphans allowed"
 )
+
+# Legacy single-call prompt kept for the remap function only.
+_AI_SYSTEM_PROMPT = _STAGE1_SYSTEM_PROMPT
+_AI_USER_PROMPT_TEMPLATE = _STAGE1_USER_TEMPLATE
 
 
 # ── Network Layer ─────────────────────────────────────────────────────────────
@@ -426,7 +432,7 @@ def _extract_json_from_response(raw_text: str) -> Optional[Dict[str, Any]]:
         raw_text: Raw text returned by the AI model.
 
     Returns:
-        Parsed dict, or None if no valid JSON object can be found.
+        Parsed dict or list, or None if no valid JSON can be found.
     """
     if not raw_text:
         return None
@@ -440,23 +446,41 @@ def _extract_json_from_response(raw_text: str) -> Optional[Dict[str, Any]]:
 
     try:
         parsed = json.loads(cleaned_text)
-        if isinstance(parsed, dict):
+        if isinstance(parsed, (dict, list)):
             return parsed
     except json.JSONDecodeError:
         pass
 
-    # Strategy 2: locate the outermost { ... } block
-    object_start_index = cleaned_text.find("{")
-    if object_start_index >= 0:
+    # Strategy 2: locate the outermost { ... } or [ ... ] block
+    first_brace = cleaned_text.find("{")
+    first_bracket = cleaned_text.find("[")
+
+    # Try array first if it appears before any object.
+    if first_bracket >= 0 and (first_brace < 0 or first_bracket < first_brace):
+        bracket_depth = 0
+        for char_index, char in enumerate(cleaned_text[first_bracket:], start=first_bracket):
+            if char == "[":
+                bracket_depth += 1
+            elif char == "]":
+                bracket_depth -= 1
+                if bracket_depth == 0:
+                    try:
+                        candidate = json.loads(cleaned_text[first_bracket: char_index + 1])
+                        if isinstance(candidate, list):
+                            return candidate
+                    except json.JSONDecodeError:
+                        break
+
+    if first_brace >= 0:
         brace_depth = 0
-        for char_index, char in enumerate(cleaned_text[object_start_index:], start=object_start_index):
+        for char_index, char in enumerate(cleaned_text[first_brace:], start=first_brace):
             if char == "{":
                 brace_depth += 1
             elif char == "}":
                 brace_depth -= 1
                 if brace_depth == 0:
                     try:
-                        candidate = json.loads(cleaned_text[object_start_index: char_index + 1])
+                        candidate = json.loads(cleaned_text[first_brace: char_index + 1])
                         if isinstance(candidate, dict):
                             return candidate
                     except json.JSONDecodeError:
@@ -659,6 +683,245 @@ def _extract_product_specs(page_html: str) -> str:
     return combined_text
 
 
+def _try_shopify_product_json(product_url: str) -> str:
+    """Try fetching product data from Shopify's .json API endpoint.
+
+    Many Shopify stores (OHM Racing, Emtron, etc.) render content via JavaScript
+    that our basic HTML fetcher cannot see. Shopify exposes product data at
+    /products/[handle].json which contains the full description HTML.
+
+    Args:
+        product_url: URL of a product page (may or may not be Shopify).
+
+    Returns:
+        Extracted text content or empty string on failure.
+    """
+    if "/products/" not in product_url:
+        return ""
+
+    json_url = product_url.rstrip("/") + ".json"
+    http_request = urllib.request.Request(
+        json_url,
+        headers={"User-Agent": "WiringWizard/1.0", "Accept": "application/json"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=REFERENCE_HTTP_TIMEOUT_SECONDS) as response:
+            data = json.loads(response.read().decode("utf-8", errors="ignore"))
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError, json.JSONDecodeError):
+        return ""
+
+    product = data.get("product", {})
+    if not product:
+        return ""
+
+    fragments: List[str] = []
+    title = product.get("title", "")
+    if title:
+        fragments.append(f"Product: {title}")
+
+    body_html = product.get("body_html", "")
+    if body_html:
+        body_text = _normalize_reference_text(body_html)
+        if body_text:
+            fragments.append(body_text)
+
+    tags = product.get("tags", [])
+    if isinstance(tags, list) and tags:
+        fragments.append(f"Tags: {', '.join(str(t) for t in tags)}")
+    elif isinstance(tags, str) and tags:
+        fragments.append(f"Tags: {tags}")
+
+    variants = product.get("variants", [])
+    if variants:
+        variant_names = [v.get("title", "") for v in variants if v.get("title")]
+        if variant_names and variant_names != ["Default Title"]:
+            fragments.append(f"Variants: {', '.join(variant_names)}")
+
+    if not fragments:
+        return ""
+    combined = " ".join(fragments)
+    return combined[:PRODUCT_SPECS_MAX_CHARS * 2]
+
+
+def _extract_json_ld_data(page_html: str) -> str:
+    """Extract product/specification data from JSON-LD structured data in HTML.
+
+    Many e-commerce sites embed schema.org Product data in JSON-LD script tags.
+    This structured data is available even when visible content is rendered by JS.
+
+    Args:
+        page_html: Raw HTML content of the fetched page.
+
+    Returns:
+        Extracted text content or empty string.
+    """
+    fragments: List[str] = []
+    for ld_match in _JSON_LD_PATTERN.finditer(page_html):
+        try:
+            ld_data = json.loads(ld_match.group(1))
+        except json.JSONDecodeError:
+            continue
+
+        items = ld_data if isinstance(ld_data, list) else [ld_data]
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            item_type = str(item.get("@type", ""))
+            if item_type not in ("Product", "IndividualProduct", "ProductModel"):
+                continue
+            name = item.get("name", "")
+            if name:
+                fragments.append(f"Product: {name}")
+            description = item.get("description", "")
+            if description:
+                fragments.append(_normalize_reference_text(description))
+
+    if not fragments:
+        return ""
+    combined = " ".join(fragments)
+    return combined[:PRODUCT_SPECS_MAX_CHARS]
+
+
+# ── Web Search Research (DuckDuckGo) ────────────────────────────────────────
+# When product URLs alone aren't enough, search forums, wikis, and datasheets.
+
+_DDG_SEARCH_URL = "https://html.duckduckgo.com/html/"
+_DDG_RESULT_PATTERN = re.compile(
+    r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+_DDG_SNIPPET_PATTERN = re.compile(
+    r'<a[^>]+class="result__snippet"[^>]*>(.*?)</a>',
+    re.IGNORECASE | re.DOTALL,
+)
+WEB_SEARCH_MAX_RESULTS = 3
+WEB_SEARCH_MAX_QUERIES = 6
+WEB_SEARCH_CONTENT_MAX_CHARS = 3000
+
+# Keywords appended to component names to find wiring-relevant results.
+_SEARCH_SUFFIXES = ("pinout wiring diagram", "wiring harness connections", "ECU pin assignment")
+
+# Patterns to identify components worth searching for in the brief.
+_SEARCHABLE_COMPONENT_PATTERN = re.compile(
+    r"\b(emtron\s+kv8|ed10m|8.button\s+can\s+keypad|"
+    r"w4a33|smart150|ohm\s+racing[^.]{0,30}|"
+    r"4g63|denso\s+injector|lsu\s*4\.?9|aem\s+fuel\s+pressure|"
+    r"gm\s+iat|gm\s+map|evo\s*x\s+sportmatic|"
+    r"mil.spec\s+harness|stage\s*3\s+fuse\s*box)\b",
+    re.IGNORECASE,
+)
+
+
+def _search_ddg(query: str) -> List[Tuple[str, str, str]]:
+    """Run a DuckDuckGo HTML search and return (title, url, snippet) tuples.
+
+    Uses the HTML-only endpoint which works without JavaScript rendering.
+    Returns up to WEB_SEARCH_MAX_RESULTS results.
+
+    Args:
+        query: Search query string.
+
+    Returns:
+        List of (title, url, snippet) tuples from search results.
+    """
+    encoded_query = urllib.request.quote(query)
+    search_url = f"{_DDG_SEARCH_URL}?q={encoded_query}"
+    http_request = urllib.request.Request(
+        search_url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=REFERENCE_HTTP_TIMEOUT_SECONDS) as response:
+            page_html = response.read().decode("utf-8", errors="ignore")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+        return []
+
+    results: List[Tuple[str, str, str]] = []
+    titles_and_urls = _DDG_RESULT_PATTERN.findall(page_html)
+    snippets = _DDG_SNIPPET_PATTERN.findall(page_html)
+
+    for index, (result_url, raw_title) in enumerate(titles_and_urls):
+        if index >= WEB_SEARCH_MAX_RESULTS:
+            break
+        title = _normalize_reference_text(raw_title)
+        snippet = _normalize_reference_text(snippets[index]) if index < len(snippets) else ""
+        # DuckDuckGo wraps URLs in a redirect — extract the real URL.
+        if "uddg=" in result_url:
+            real_url_match = re.search(r"uddg=([^&]+)", result_url)
+            if real_url_match:
+                result_url = urllib.request.unquote(real_url_match.group(1))
+        results.append((title, result_url, snippet))
+
+    return results
+
+
+def _build_web_search_research(brief_text: str) -> Tuple[str, List[str]]:
+    """Search the web for pinouts, wiring info, and forum posts about key components.
+
+    Identifies important component names in the brief, runs targeted searches
+    via DuckDuckGo, extracts snippets and follows the best result URLs to
+    scrape content from forums, wikis, and datasheets.
+
+    Args:
+        brief_text: The user's free-text project brief.
+
+    Returns:
+        Tuple of (research_context_string, list_of_user_facing_notes).
+    """
+    component_matches = _SEARCHABLE_COMPONENT_PATTERN.findall(brief_text)
+    if not component_matches:
+        return "", []
+
+    # Deduplicate component names (case-insensitive).
+    seen_names: set = set()
+    unique_components: List[str] = []
+    for match in component_matches:
+        normalised = match.strip().lower()
+        if normalised not in seen_names:
+            seen_names.add(normalised)
+            unique_components.append(match.strip())
+
+    context_lines = ["Web Search Research:"]
+    research_notes: List[str] = []
+    queries_run = 0
+
+    for component_name in unique_components:
+        if queries_run >= WEB_SEARCH_MAX_QUERIES:
+            break
+
+        search_query = f"{component_name} {_SEARCH_SUFFIXES[queries_run % len(_SEARCH_SUFFIXES)]}"
+        _log(f"Web search: {search_query}")
+        results = _search_ddg(search_query)
+        queries_run += 1
+
+        if not results:
+            continue
+
+        context_lines.append(f"\n[Search: {component_name}]")
+        for title, result_url, snippet in results:
+            context_lines.append(f"  - {title}")
+            context_lines.append(f"    URL: {result_url}")
+            if snippet:
+                context_lines.append(f"    Snippet: {snippet}")
+            research_notes.append(f"Web search found: {title}")
+
+            # Follow the first result URL to scrape deeper content.
+            result_html = _fetch_reference_page_html(result_url)
+            if not result_html:
+                continue
+            deep_specs = _extract_product_specs(result_html)
+            if deep_specs:
+                context_lines.append(f"    Content: {deep_specs[:WEB_SEARCH_CONTENT_MAX_CHARS]}")
+
+    if len(context_lines) <= 1:
+        return "", []
+    return "\n".join(context_lines), research_notes
+
+
 def _extract_reference_links(page_html: str, base_url: str) -> List[Tuple[str, str]]:
     """Return likely manual, wiring, or pinout links discovered on a reference page."""
     discovered_links: List[Tuple[str, str]] = []
@@ -680,9 +943,9 @@ def _build_reference_research_context(brief_text: str) -> Tuple[str, List[str]]:
     """
     Turn URLs found in the brief into compact research context and user-facing notes.
 
-    Fetches each URL, extracts page title / meta description, and discovers links
-    to manuals, schematics, and pinout documents.  The research context string is
-    appended to the AI prompt; the notes list is shown to the user in the draft.
+    For each URL: tries Shopify JSON API first (gets JS-rendered product content),
+    then falls back to HTML scraping with JSON-LD extraction. Also discovers links
+    to manuals, schematics, and pinout documents via multi-hop following.
 
     Args:
         brief_text: The user's free-text project brief (may contain URLs).
@@ -699,6 +962,17 @@ def _build_reference_research_context(brief_text: str) -> Tuple[str, List[str]]:
     research_notes: List[str] = []
 
     for reference_url in reference_urls:
+        _log(f"Researching URL: {reference_url}")
+
+        # ── Strategy 1: Shopify JSON API (gets JS-rendered content) ───────
+        shopify_content = _try_shopify_product_json(reference_url)
+        if shopify_content:
+            context_lines.append(f"- [Shopify Product] {reference_url}")
+            context_lines.append(f"  Full Content: {shopify_content}")
+            research_notes.append(f"Shopify product data extracted: {reference_url}")
+            _log(f"  Shopify JSON success: {len(shopify_content)} chars")
+
+        # ── Strategy 2: Standard HTML fetch ───────────────────────────────
         page_html = _fetch_reference_page_html(reference_url)
         if not page_html:
             continue
@@ -712,6 +986,12 @@ def _build_reference_research_context(brief_text: str) -> Tuple[str, List[str]]:
         if page_description:
             context_lines.append(f"  Summary: {page_description}")
 
+        # ── Strategy 3: JSON-LD structured data ───────────────────────────
+        json_ld_content = _extract_json_ld_data(page_html)
+        if json_ld_content:
+            context_lines.append(f"  Structured Data: {json_ld_content}")
+            _log(f"  JSON-LD extracted: {len(json_ld_content)} chars")
+
         product_specs = _extract_product_specs(page_html)
         if product_specs:
             context_lines.append(f"  Product Details: {product_specs}")
@@ -722,7 +1002,6 @@ def _build_reference_research_context(brief_text: str) -> Tuple[str, List[str]]:
                 f"Possible schematic or pinout document: {link_label} — {link_url}"
             )
 
-            # Multi-hop: fetch linked manuals/datasheets and extract their content
             linked_html = _fetch_reference_page_html(link_url)
             if not linked_html:
                 continue
@@ -732,7 +1011,6 @@ def _build_reference_research_context(brief_text: str) -> Tuple[str, List[str]]:
                 context_lines.append(f"    Deep Reference ({linked_title}): {linked_specs}")
                 research_notes.append(f"Deep reference extracted: {linked_title}")
 
-    # If no pages were fetched successfully, return empty.
     if len(context_lines) == 1:
         return "", []
     return "\n".join(context_lines), research_notes
@@ -907,6 +1185,130 @@ def _run_fallback_parser(brief_text: str, requested_project_name: str) -> Dict[s
 
 
 # ── AI Draft Attempt ──────────────────────────────────────────────────────────
+# Two-stage pipeline: Stage 1 decomposes components, Stage 2 generates connections.
+
+def _validate_and_fix_draft(
+    components: List[Dict[str, Any]],
+    connections: List[Dict[str, Any]],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[str]]:
+    """Post-AI validation ensuring critical wiring rules are met.
+
+    Checks for and auto-fixes: components without ground connections,
+    CAN devices without CAN bus connections, and missing infrastructure.
+
+    Args:
+        components:  Component list from the AI.
+        connections: Connection list from the AI.
+
+    Returns:
+        Tuple of (fixed_components, fixed_connections, warning_notes).
+    """
+    warnings: List[str] = []
+    component_ids = {c.get("component_id") for c in components}
+
+    # ── Ensure a ground bus exists ────────────────────────────────────────
+    ground_bus_id = None
+    for comp in components:
+        if comp.get("component_type") == "ground_bus":
+            ground_bus_id = comp["component_id"]
+            break
+    if not ground_bus_id:
+        ground_bus_id = "ground_bus1"
+        components.append({
+            "component_id": ground_bus_id,
+            "component_name": "Chassis Ground Bus",
+            "component_type": "ground_bus",
+            "current_draw_amps": 0,
+            "position_label": "Engine Bay / Firewall",
+            "pins": ["CHASSIS"] + [f"G{i}" for i in range(1, 25)],
+        })
+        warnings.append("Auto-added missing ground bus")
+
+    # ── Ensure every component has a ground connection ────────────────────
+    grounded_component_ids: set = set()
+    for conn in connections:
+        if conn.get("circuit_type") == "ground":
+            grounded_component_ids.add(conn.get("from_component_id"))
+            grounded_component_ids.add(conn.get("to_component_id"))
+
+    skip_ground_types = frozenset({
+        "ground_bus", "battery", "fuse", "termination_resistor", "ignition_switch",
+    })
+
+    next_conn_id = len(connections) + 1
+    ground_pin_counter = 1
+    for comp in components:
+        comp_id = comp.get("component_id", "")
+        comp_type = comp.get("component_type", "")
+        if comp_type in skip_ground_types:
+            continue
+        if comp_id in grounded_component_ids:
+            continue
+        connections.append({
+            "connection_id": f"conn_{next_conn_id:03d}",
+            "from_component_id": comp_id,
+            "from_pin": "GND",
+            "to_component_id": ground_bus_id,
+            "to_pin": f"G{ground_pin_counter}",
+            "current_amps": comp.get("current_draw_amps", 0.5),
+            "run_length_ft": 3.0,
+            "wire_color": "black",
+            "wire_gauge_awg": "16",
+            "circuit_type": "ground",
+        })
+        next_conn_id += 1
+        ground_pin_counter += 1
+        warnings.append(f"Auto-added ground for {comp.get('component_name', comp_id)}")
+
+    # ── Ensure CAN devices have CAN bus connections ───────────────────────
+    can_device_ids: List[str] = []
+    for comp in components:
+        comp_type = comp.get("component_type", "")
+        pins = comp.get("pins", [])
+        has_can_pins = any("CAN" in str(p).upper() for p in pins)
+        if comp_type in ("ecu", "display") or has_can_pins:
+            can_device_ids.append(comp["component_id"])
+
+    can_connected_ids: set = set()
+    for conn in connections:
+        if conn.get("circuit_type") == "can_bus":
+            can_connected_ids.add(conn.get("from_component_id"))
+            can_connected_ids.add(conn.get("to_component_id"))
+
+    # Daisy-chain any CAN devices that are missing CAN connections.
+    missing_can_ids = [cid for cid in can_device_ids if cid not in can_connected_ids]
+    if len(missing_can_ids) >= 2:
+        for i in range(len(missing_can_ids) - 1):
+            connections.append({
+                "connection_id": f"conn_{next_conn_id:03d}",
+                "from_component_id": missing_can_ids[i],
+                "from_pin": "CAN_H",
+                "to_component_id": missing_can_ids[i + 1],
+                "to_pin": "CAN_H",
+                "current_amps": 0.05,
+                "run_length_ft": 4.0,
+                "wire_color": "yellow/green",
+                "wire_gauge_awg": "22",
+                "circuit_type": "can_bus",
+            })
+            next_conn_id += 1
+            connections.append({
+                "connection_id": f"conn_{next_conn_id:03d}",
+                "from_component_id": missing_can_ids[i],
+                "from_pin": "CAN_L",
+                "to_component_id": missing_can_ids[i + 1],
+                "to_pin": "CAN_L",
+                "current_amps": 0.05,
+                "run_length_ft": 4.0,
+                "wire_color": "green",
+                "wire_gauge_awg": "22",
+                "circuit_type": "can_bus",
+            })
+            next_conn_id += 1
+        warnings.append(f"Auto-added CAN bus for {len(missing_can_ids)} devices")
+
+    return components, connections, warnings
+
 
 def _attempt_ai_draft(
     brief_text: str,
@@ -914,60 +1316,137 @@ def _attempt_ai_draft(
     api_token: str,
 ) -> Optional[Dict[str, Any]]:
     """
-    Try to produce a structured draft using the GitHub Models API.
+    Two-stage AI pipeline to produce a structured wiring draft.
 
-    Returns a valid payload dict on success, or None if the API call fails or
-    the model returns a response that cannot be parsed into the required shape.
-    The caller should fall back to _run_fallback_parser on a None return.
+    Stage 0: Research — scrape user URLs (Shopify JSON, JSON-LD, HTML) and run
+             web searches for key components via DuckDuckGo.
+    Stage 1: Component Decomposition — focused AI call that identifies every
+             individual component from the brief and research context.
+    Stage 2: Connection Generation — focused AI call that takes the component
+             list and generates all power, ground, signal, and CAN connections.
+    Validation: Programmatic check that auto-fixes missing grounds and CAN bus.
 
-    Args:
-        brief_text:             Free-text project brief (pre-validated as non-empty).
-        requested_project_name: User-supplied project name override (may be empty).
-        api_token:              Resolved GitHub Models bearer token.
-
-    Returns:
-        Payload dict with used_ai=True, or None on any failure.
+    Returns a valid payload dict on success, or None on failure.
     """
-    # Enrich the brief with any reference material from supplied URLs.
-    research_context, _ = _build_reference_research_context(brief_text)
-    enriched_brief = brief_text
-    if research_context:
-        enriched_brief = f"{brief_text}\n\n{research_context}"
+    _log("=" * 60)
+    _log("Starting two-stage AI draft pipeline")
+    _log(f"Brief length: {len(brief_text)} chars")
 
-    user_prompt = _AI_USER_PROMPT_TEMPLATE.format(brief_text=enriched_brief[:12000])
-    raw_response = _call_github_models_api(_AI_SYSTEM_PROMPT, user_prompt, api_token)
+    # ── Stage 0: Research ─────────────────────────────────────────────────
+    _log("Stage 0: Research — scraping URLs and searching web")
+    url_research, url_notes = _build_reference_research_context(brief_text)
+    web_research, web_notes = _build_web_search_research(brief_text)
+    all_research = "\n\n".join(filter(None, [url_research, web_research]))
+    all_notes = url_notes + web_notes
+    _log(f"  URL research: {len(url_research)} chars")
+    _log(f"  Web search research: {len(web_research)} chars")
 
-    if not raw_response:
-        return None
+    # ── Stage 1: Component Decomposition ──────────────────────────────────
+    _log("Stage 1: Component decomposition")
+    research_section = ""
+    if all_research:
+        research_section = f"REFERENCE RESEARCH:\n{all_research}\n\n"
 
-    parsed_response = _extract_json_from_response(raw_response)
-    if not isinstance(parsed_response, dict):
-        return None
-
-    # Both lists are required — reject partial responses.
-    has_valid_components = isinstance(parsed_response.get("components"), list)
-    has_valid_connections = isinstance(parsed_response.get("connections"), list)
-    if not has_valid_components or not has_valid_connections:
-        return None
-
-    # User-supplied name takes precedence over the AI-suggested name.
-    resolved_project_name = (
-        requested_project_name.strip()
-        or str(parsed_response.get("project_name", "Wiring Project")).strip()
+    stage1_user_prompt = _STAGE1_USER_TEMPLATE.format(
+        brief_text=brief_text[:10000],
+        research_section=research_section[:8000],
+    )
+    _log(f"  Stage 1 prompt length: {len(stage1_user_prompt)} chars")
+    stage1_response = _call_github_models_api(
+        _STAGE1_SYSTEM_PROMPT, stage1_user_prompt, api_token
     )
 
-    raw_notes = parsed_response.get("notes", [])
-    notes_list: List[str] = raw_notes if isinstance(raw_notes, list) else ([str(raw_notes)] if raw_notes else [])
-    # Mandatory safety note appended to every AI-generated draft.
+    if not stage1_response:
+        _log("  Stage 1 FAILED: no response from API")
+        return None
+    _log(f"  Stage 1 response length: {len(stage1_response)} chars")
+    _log(f"  Stage 1 response preview: {stage1_response[:300]}")
+
+    # Parse — Stage 1 returns a JSON array directly or wrapped in an object.
+    stage1_parsed = _extract_json_from_response(stage1_response)
+    components: Optional[List[Dict[str, Any]]] = None
+
+    if isinstance(stage1_parsed, dict):
+        # AI may have wrapped the array in {"components": [...]}
+        components = stage1_parsed.get("components")
+        if not isinstance(components, list):
+            components = None
+    elif isinstance(stage1_parsed, list):
+        components = stage1_parsed
+    else:
+        # Try parsing as raw JSON array.
+        try:
+            raw_array = json.loads(stage1_response.strip().strip("`").strip())
+            if isinstance(raw_array, list):
+                components = raw_array
+        except json.JSONDecodeError:
+            pass
+
+    if not components:
+        _log("  Stage 1 FAILED: could not parse component list")
+        return None
+    _log(f"  Stage 1 produced {len(components)} components")
+
+    # ── Stage 2: Connection Generation ────────────────────────────────────
+    _log("Stage 2: Connection generation")
+    brief_summary = brief_text[:3000]
+    components_json = json.dumps(components, indent=1)
+
+    stage2_user_prompt = _STAGE2_USER_TEMPLATE.format(
+        components_json=components_json[:12000],
+        brief_summary=brief_summary,
+    )
+    _log(f"  Stage 2 prompt length: {len(stage2_user_prompt)} chars")
+    stage2_response = _call_github_models_api(
+        _STAGE2_SYSTEM_PROMPT, stage2_user_prompt, api_token
+    )
+
+    if not stage2_response:
+        _log("  Stage 2 FAILED: no response from API")
+        return None
+    _log(f"  Stage 2 response length: {len(stage2_response)} chars")
+    _log(f"  Stage 2 response preview: {stage2_response[:300]}")
+
+    stage2_parsed = _extract_json_from_response(stage2_response)
+    connections: List[Dict[str, Any]] = []
+    ai_notes: List[str] = []
+
+    if isinstance(stage2_parsed, dict):
+        connections = stage2_parsed.get("connections", [])
+        raw_notes = stage2_parsed.get("notes", [])
+        if isinstance(raw_notes, list):
+            ai_notes = [str(n) for n in raw_notes]
+        elif raw_notes:
+            ai_notes = [str(raw_notes)]
+    elif isinstance(stage2_parsed, list):
+        connections = stage2_parsed
+
+    if not isinstance(connections, list):
+        connections = []
+    _log(f"  Stage 2 produced {len(connections)} connections")
+
+    # ── Validation: auto-fix missing grounds and CAN bus ──────────────────
+    _log("Validation: checking grounds, CAN bus, orphaned components")
+    components, connections, validation_warnings = _validate_and_fix_draft(
+        components, connections
+    )
+    _log(f"  Validation added {len(validation_warnings)} fixes")
+
+    # ── Assemble final draft ──────────────────────────────────────────────
+    resolved_project_name = requested_project_name.strip() or "Wiring Project"
+
+    notes_list = ai_notes + all_notes + validation_warnings
     notes_list.append(
-        "AI-generated draft — always verify pinouts, polarities, and critical wiring details before use."
+        "AI-generated draft — always verify pinouts, polarities, and "
+        "critical wiring details before use."
     )
 
+    _log(f"Draft complete: {len(components)} components, {len(connections)} connections")
     return {
         "project_name": resolved_project_name,
-        "description": str(parsed_response.get("description", brief_text[:200])).strip(),
-        "components": parsed_response["components"],
-        "connections": parsed_response["connections"],
+        "description": brief_text[:200].strip(),
+        "components": components,
+        "connections": connections,
         "notes": notes_list,
         "used_ai": True,
     }

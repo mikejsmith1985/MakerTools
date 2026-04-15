@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WiringWizard — two-stage AI pipeline**: replaced single monolithic AI call with a focused two-stage pipeline: Stage 1 decomposes user input into individual components (e.g., each injector, each sensor separately), Stage 2 generates all connections with proper grounds, CAN bus, and signal wiring.
+- **WiringWizard — Shopify JSON API extraction**: product pages on Shopify stores (OHM Racing, Emtron) are now fetched via their JSON API endpoint, bypassing JavaScript-rendering limitations.
+- **WiringWizard — JSON-LD structured data**: extracts schema.org Product data from JSON-LD script tags on product pages for richer component metadata.
+- **WiringWizard — DuckDuckGo web search**: automatically searches forums, wikis, and datasheets for key components (Emtron KV8, W4A33, 4g63, OHM Racing, etc.) to gather pin-level wiring information from community sources.
+- **WiringWizard — post-AI validation**: programmatic auto-fix ensures every component has a ground connection, adds a ground bus if missing, and daisy-chains CAN-H/CAN-L for all CAN-capable devices.
+- **WiringWizard — debug logging**: AI pipeline writes diagnostic output to `data/ai_debug.log` for troubleshooting research and generation quality.
+- **WiringWizard — diagram infrastructure column**: new component types (ground_bus, fuse_box, termination_resistor, ignition_switch) are placed in a dedicated infrastructure column in the SVG diagram layout.
+- **WiringWizard — CAN bus wire color**: added yellow/green wire color for CAN-H connections to the diagram renderer.
+
+### Changed
+- **WiringWizard — AI model upgrade**: switched from gpt-4o-mini to gpt-4o with 16384 max tokens for higher quality wiring output.
+- **WiringWizard — harness decomposition**: AI prompts now explicitly require wiring harnesses to be broken down into individual sub-components (injectors, sensors, coils) rather than treated as single boxes.
+
+### Added
 - **WiringWizard — web-based UI rewrite**: replaced the Tkinter desktop interface with a modern Eel-powered web UI (HTML/CSS/JS + SVG) providing a professional dark-themed experience inspired by AetherLink Wiring Studio.
   - Interactive SVG wiring diagram with zoom/pan (mouse wheel + drag), click-to-select components, and BFS circuit tracing on wire click
   - Left sidebar with component tree and connection list (with edit/delete inline actions)

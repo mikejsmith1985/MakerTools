@@ -32,7 +32,7 @@ const WIRE_COLOR_MAP = {
   red:    '#e85454', black:  '#8b8b8b', blue:   '#58a6ff',
   green:  '#3fb950', yellow: '#d29922', orange: '#db6d28',
   white:  '#d0d7de', purple: '#a371f7', brown:  '#a0704e',
-  pink:   '#db61a2',
+  pink:   '#db61a2', 'yellow/green': '#b8cc2a',
 };
 const DEFAULT_WIRE_COLOR = '#7d8590';
 
@@ -51,9 +51,15 @@ const GRID_DOT_SPACING = 30;
 // Power types placed on the left column
 const POWER_SOURCE_TYPES = new Set(['battery', 'power_supply']);
 // Control/processing types in center
-const CONTROLLER_TYPES = new Set(['ecu', 'microcontroller', 'motor_driver', 'display']);
+const CONTROLLER_TYPES = new Set([
+  'ecu', 'microcontroller', 'motor_driver', 'display', 'ignition_switch',
+]);
 // Protection placed between source and loads
-const PROTECTION_TYPES = new Set(['fuse', 'relay']);
+const PROTECTION_TYPES = new Set(['fuse', 'fuse_box', 'relay']);
+// Infrastructure types placed in their own column
+const INFRASTRUCTURE_TYPES = new Set([
+  'ground_bus', 'termination_resistor',
+]);
 
 // ── SVG Namespace ──────────────────────────────────────────────────────────
 const SVG_NS = 'http://www.w3.org/2000/svg';
@@ -244,17 +250,18 @@ function computeLayout() {
   diagramState.componentPositions.clear();
   diagramState.pinPositions.clear();
 
-  const columns = { power: [], protection: [], controller: [], load: [] };
+  const columns = { power: [], protection: [], controller: [], load: [], infra: [] };
 
   for (const comp of diagramState.components) {
     const componentType = comp.component_type || '';
     if (POWER_SOURCE_TYPES.has(componentType)) columns.power.push(comp);
     else if (PROTECTION_TYPES.has(componentType)) columns.protection.push(comp);
     else if (CONTROLLER_TYPES.has(componentType)) columns.controller.push(comp);
+    else if (INFRASTRUCTURE_TYPES.has(componentType)) columns.infra.push(comp);
     else columns.load.push(comp);
   }
 
-  const columnOrder = ['power', 'protection', 'controller', 'load'];
+  const columnOrder = ['power', 'protection', 'controller', 'load', 'infra'];
   let currentColumnX = GRID_MARGIN_X;
 
   for (const columnName of columnOrder) {

@@ -352,9 +352,10 @@ class TestExtractJsonFromResponse(unittest.TestCase):
     def test_returns_none_for_invalid_json(self) -> None:
         self.assertIsNone(_extract_json_from_response("{bad json"))
 
-    def test_returns_none_when_top_level_is_array_not_dict(self) -> None:
-        # A bare JSON array with no embedded object should return None.
-        self.assertIsNone(_extract_json_from_response('["string_only", "another"]'))
+    def test_returns_list_when_top_level_is_array(self) -> None:
+        # JSON arrays are now valid — needed for Stage 1 component responses.
+        result = _extract_json_from_response('["string_only", "another"]')
+        self.assertEqual(result, ["string_only", "another"])
 
 
 # ── Public API — draft_project_from_brief ────────────────────────────────────
@@ -399,25 +400,26 @@ class TestDraftProjectFromBrief(unittest.TestCase):
         self.assertFalse(result["used_ai"])
 
     def test_ai_path_used_when_api_returns_valid_response(self) -> None:
-        valid_ai_response = json.dumps({
-            "project_name": "Smart Fan",
-            "description": "Arduino controls a fan based on temperature.",
-            "components": [
-                {
-                    "component_id": "battery1",
-                    "component_name": "Battery",
-                    "component_type": "battery",
-                    "current_draw_amps": 20.0,
-                    "position_label": "Enclosure",
-                },
-                {
-                    "component_id": "arduino1",
-                    "component_name": "Arduino Nano",
-                    "component_type": "microcontroller",
-                    "current_draw_amps": 0.5,
-                    "position_label": "PCB",
-                },
-            ],
+        # Two-stage pipeline: Stage 1 returns component array, Stage 2 returns connections.
+        stage1_response = json.dumps([
+            {
+                "component_id": "battery1",
+                "component_name": "Battery",
+                "component_type": "battery",
+                "current_draw_amps": 20.0,
+                "position_label": "Enclosure",
+                "pins": ["POS", "NEG"],
+            },
+            {
+                "component_id": "arduino1",
+                "component_name": "Arduino Nano",
+                "component_type": "microcontroller",
+                "current_draw_amps": 0.5,
+                "position_label": "PCB",
+                "pins": ["VIN", "GND"],
+            },
+        ])
+        stage2_response = json.dumps({
             "connections": [
                 {
                     "connection_id": "conn_001",
@@ -428,44 +430,40 @@ class TestDraftProjectFromBrief(unittest.TestCase):
                     "current_amps": 0.5,
                     "run_length_ft": 2.0,
                     "wire_color": "red",
+                    "circuit_type": "power_always_on",
                 }
             ],
             "notes": ["Check fan voltage rating."],
         })
-        with patch("core.ai_intake._call_github_models_api", return_value=valid_ai_response):
+        with patch("core.ai_intake._call_github_models_api", side_effect=[stage1_response, stage2_response]):
             with patch.dict(os.environ, {"WIRINGWIZARD_GITHUB_TOKEN": "test_token"}):
-                result = draft_project_from_brief("Arduino fan controller", "")
+                result = draft_project_from_brief("Arduino fan controller", "Smart Fan")
         self.assertTrue(result["used_ai"])
         self.assertEqual(result["project_name"], "Smart Fan")
-        self.assertEqual(len(result["components"]), 2)
+        # Stage 1 gave 2 components; validation may add ground_bus.
+        self.assertGreaterEqual(len(result["components"]), 2)
 
     def test_ai_safety_note_always_appended_to_ai_result(self) -> None:
-        valid_ai_response = json.dumps({
-            "project_name": "Project",
-            "description": "Desc",
-            "components": [{"component_id": "b1", "component_name": "Battery",
-                            "component_type": "battery", "current_draw_amps": 5.0,
-                            "position_label": "Box"}],
-            "connections": [],
-            "notes": [],
-        })
-        with patch("core.ai_intake._call_github_models_api", return_value=valid_ai_response):
+        stage1_response = json.dumps([
+            {"component_id": "b1", "component_name": "Battery",
+             "component_type": "battery", "current_draw_amps": 5.0,
+             "position_label": "Box", "pins": ["POS", "NEG"]},
+        ])
+        stage2_response = json.dumps({"connections": [], "notes": []})
+        with patch("core.ai_intake._call_github_models_api", side_effect=[stage1_response, stage2_response]):
             with patch.dict(os.environ, {"WIRINGWIZARD_GITHUB_TOKEN": "test_token"}):
                 result = draft_project_from_brief("battery project", "")
         safety_note = "AI-generated draft — always verify pinouts"
         self.assertTrue(any(safety_note in note for note in result["notes"]))
 
     def test_requested_project_name_overrides_ai_name(self) -> None:
-        valid_ai_response = json.dumps({
-            "project_name": "AI Suggested Name",
-            "description": "Desc",
-            "components": [{"component_id": "b1", "component_name": "Battery",
-                            "component_type": "battery", "current_draw_amps": 5.0,
-                            "position_label": "Box"}],
-            "connections": [],
-            "notes": [],
-        })
-        with patch("core.ai_intake._call_github_models_api", return_value=valid_ai_response):
+        stage1_response = json.dumps([
+            {"component_id": "b1", "component_name": "Battery",
+             "component_type": "battery", "current_draw_amps": 5.0,
+             "position_label": "Box", "pins": ["POS", "NEG"]},
+        ])
+        stage2_response = json.dumps({"connections": [], "notes": []})
+        with patch("core.ai_intake._call_github_models_api", side_effect=[stage1_response, stage2_response]):
             with patch.dict(os.environ, {"WIRINGWIZARD_GITHUB_TOKEN": "test_token"}):
                 result = draft_project_from_brief("battery project", "User Name Override")
         self.assertEqual(result["project_name"], "User Name Override")
@@ -535,14 +533,16 @@ class TestGuiTokenSettings(unittest.TestCase):
 class TestAttemptAiDraft(unittest.TestCase):
 
     def test_returns_none_when_components_key_missing(self) -> None:
+        # Stage 1 returns a dict without a "components" key → should fail.
         malformed_response = json.dumps({"project_name": "X", "connections": []})
         with patch("core.ai_intake._call_github_models_api", return_value=malformed_response):
             result = _attempt_ai_draft("brief", "", "token")
         self.assertIsNone(result)
 
-    def test_returns_none_when_connections_key_missing(self) -> None:
-        malformed_response = json.dumps({"project_name": "X", "components": []})
-        with patch("core.ai_intake._call_github_models_api", return_value=malformed_response):
+    def test_returns_none_when_stage1_returns_empty_list(self) -> None:
+        # Stage 1 returns an empty component list → should fail.
+        empty_list_response = json.dumps([])
+        with patch("core.ai_intake._call_github_models_api", return_value=empty_list_response):
             result = _attempt_ai_draft("brief", "", "token")
         self.assertIsNone(result)
 
@@ -552,18 +552,20 @@ class TestAttemptAiDraft(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_includes_reference_research_context_in_ai_prompt(self) -> None:
-        captured_prompt = {}
-        valid_response = json.dumps({
-            "project_name": "Research Project",
-            "description": "Desc",
-            "components": [],
-            "connections": [],
-            "notes": [],
-        })
+        captured_prompts: list = []
+        stage1_components = json.dumps([
+            {"component_id": "ecu1", "component_name": "ECU", "component_type": "ecu",
+             "current_draw_amps": 3.0, "position_label": "Firewall", "pins": ["B+", "GND"]},
+        ])
+        stage2_connections = json.dumps({"connections": [], "notes": []})
 
+        call_count = [0]
         def capture_prompt(_system_prompt: str, user_prompt: str, _api_token: str) -> str:
-            captured_prompt["user_prompt"] = user_prompt
-            return valid_response
+            captured_prompts.append(user_prompt)
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return stage1_components
+            return stage2_connections
 
         with patch(
             "core.ai_intake._build_reference_research_context",
@@ -572,11 +574,14 @@ class TestAttemptAiDraft(unittest.TestCase):
                 [],
             ),
         ):
-            with patch("core.ai_intake._call_github_models_api", side_effect=capture_prompt):
-                _attempt_ai_draft("Use https://example.com/kv8", "", "token")
+            with patch("core.ai_intake._build_web_search_research", return_value=("", [])):
+                with patch("core.ai_intake._call_github_models_api", side_effect=capture_prompt):
+                    _attempt_ai_draft("Use https://example.com/kv8", "", "token")
 
-        self.assertIn("Emtron KV8 ECU", captured_prompt["user_prompt"])
-        self.assertIn("kv8.pdf", captured_prompt["user_prompt"])
+        # Research context should appear in the Stage 1 prompt.
+        self.assertTrue(len(captured_prompts) >= 1)
+        self.assertIn("Emtron KV8 ECU", captured_prompts[0])
+        self.assertIn("kv8.pdf", captured_prompts[0])
 
 
 if __name__ == "__main__":

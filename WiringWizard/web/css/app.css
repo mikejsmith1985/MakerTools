@@ -834,3 +834,56 @@ body {
 
 /* ── Responsive / Utility ───────────────────────────────────────────────── */
 .hidden { display: none !important; }
+
+/* ── Remap Modal Tabs & Quick Actions ──────────────────────────────────── */
+.remap-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--border);
+}
+.remap-tab {
+  flex: 1;
+  padding: 10px 16px;
+  background: transparent;
+  color: var(--text-secondary);
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+.remap-tab:hover { color: var(--text-primary); }
+.remap-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.remap-panel { margin-top: 4px; }
+.remap-ai-btn,
+.remap-quick-btn {
+  margin-top: 12px;
+  width: 100%;
+}
+.remap-action-row {
+  margin-bottom: 12px;
+}
+.remap-action-row label,
+.remap-fields label {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.remap-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--surface-alt, rgba(255,255,255,0.03));
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.form-row { display: flex; flex-direction: column; gap: 4px; }
+.form-row label { font-size: 0.78rem; color: var(--text-secondary); }

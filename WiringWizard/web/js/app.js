@@ -355,7 +355,9 @@ function bindModalButtons() {
   getElement('btn-copy-report').addEventListener('click', copyReport);
 
   // Remap
-  getElement('btn-apply-remap').addEventListener('click', applyRemap);
+  getElement('btn-ai-remap').addEventListener('click', applyAiRemap);
+  getElement('btn-quick-remap').addEventListener('click', applyQuickRemap);
+  initRemapModal();
 }
 
 function openModal(modalId) { getElement(modalId).hidden = false; }
@@ -729,9 +731,155 @@ function copyReport() {
 
 // ── Remap (Apply Changes) ─────────────────────────────────────────────────
 
-async function applyRemap() {
-  const remapJson = getElement('remap-json').value.trim();
-  if (!remapJson) { alert('Enter change requests as JSON.'); return; }
+/**
+ * Initialize the remap modal tabs, action selector, and component dropdowns.
+ */
+function initRemapModal() {
+  // Tab switching
+  document.querySelectorAll('.remap-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.remap-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const targetPanel = tab.getAttribute('data-remap-tab');
+      getElement('remap-panel-ai').hidden = (targetPanel !== 'ai');
+      getElement('remap-panel-quick').hidden = (targetPanel !== 'quick');
+    });
+  });
+
+  // Quick-action type selector — show/hide relevant fields
+  getElement('remap-action-type').addEventListener('change', (event) => {
+    const actionType = event.target.value;
+    document.querySelectorAll('.remap-fields').forEach(fieldGroup => { fieldGroup.hidden = true; });
+    getElement('btn-quick-remap').disabled = !actionType;
+
+    if (actionType === 'remove_component') {
+      populateComponentSelect('remap-remove-comp-select');
+      getElement('remap-fields-remove-component').hidden = false;
+    } else if (actionType === 'remove_connection') {
+      populateConnectionSelect('remap-remove-conn-select');
+      getElement('remap-fields-remove-connection').hidden = false;
+    } else if (actionType === 'add_component') {
+      getElement('remap-fields-add-component').hidden = false;
+    } else if (actionType === 'add_connection') {
+      populateComponentSelect('remap-add-conn-from');
+      populateComponentSelect('remap-add-conn-to');
+      getElement('remap-fields-add-connection').hidden = false;
+    }
+  });
+}
+
+/** Fill a <select> with current project components. */
+function populateComponentSelect(selectElementId) {
+  const selectElement = getElement(selectElementId);
+  selectElement.innerHTML = '';
+  appState.components.forEach(comp => {
+    const option = document.createElement('option');
+    option.value = comp.component_id;
+    option.textContent = `${comp.component_name} (${comp.component_id})`;
+    selectElement.appendChild(option);
+  });
+}
+
+/** Fill a <select> with current project connections. */
+function populateConnectionSelect(selectElementId) {
+  const selectElement = getElement(selectElementId);
+  selectElement.innerHTML = '';
+  appState.connections.forEach(conn => {
+    const fromName = findComponentName(conn.from_component_id);
+    const toName = findComponentName(conn.to_component_id);
+    const option = document.createElement('option');
+    option.value = conn.connection_id;
+    option.textContent = `${conn.connection_id}: ${fromName} → ${toName}`;
+    selectElement.appendChild(option);
+  });
+}
+
+/** Look up a component's display name from its ID. */
+function findComponentName(componentId) {
+  const match = appState.components.find(c => c.component_id === componentId);
+  return match ? match.component_name : componentId;
+}
+
+/** AI-powered natural language remap — sends description to backend. */
+async function applyAiRemap() {
+  const changeDescription = getElement('remap-ai-text').value.trim();
+  if (!changeDescription) { alert('Describe what you want to change.'); return; }
+
+  showLoading(true);
+  setStatus('🤖 AI is re-mapping your project…');
+
+  try {
+    const result = await eel.ai_remap_project(
+      appState.projectProfile,
+      appState.components,
+      appState.connections,
+      changeDescription
+    )();
+
+    if (result.error) {
+      alert(`Remap Error: ${result.error}`);
+      setStatus('Remap failed');
+      return;
+    }
+
+    appState.components = result.components || appState.components;
+    appState.connections = result.connections || appState.connections;
+
+    closeModal('modal-remap');
+    getElement('remap-ai-text').value = '';
+    refreshFullUI();
+    setStatus('Changes applied via AI');
+  } catch (error) {
+    alert(`Remap Error: ${error}`);
+    setStatus('Remap failed');
+  } finally {
+    showLoading(false);
+  }
+}
+
+/** Quick-action form — builds structured JSON from form fields and applies directly. */
+async function applyQuickRemap() {
+  const actionType = getElement('remap-action-type').value;
+  if (!actionType) return;
+
+  let changeRequests = [];
+
+  if (actionType === 'remove_component') {
+    const componentId = getElement('remap-remove-comp-select').value;
+    changeRequests = [{ operation: 'remove_component', payload: { component_id: componentId } }];
+  } else if (actionType === 'remove_connection') {
+    const connectionId = getElement('remap-remove-conn-select').value;
+    changeRequests = [{ operation: 'remove_connection', payload: { connection_id: connectionId } }];
+  } else if (actionType === 'add_component') {
+    const componentName = getElement('remap-add-comp-name').value.trim();
+    if (!componentName) { alert('Enter a component name.'); return; }
+    const componentId = componentName.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '') + '1';
+    changeRequests = [{ operation: 'add_component', payload: {
+      component_id: componentId,
+      component_name: componentName,
+      component_type: getElement('remap-add-comp-type').value,
+      current_draw_amps: parseFloat(getElement('remap-add-comp-amps').value) || 1,
+      position_label: getElement('remap-add-comp-location').value.trim() || 'TBD',
+    }}];
+  } else if (actionType === 'add_connection') {
+    const fromId = getElement('remap-add-conn-from').value;
+    const toId = getElement('remap-add-conn-to').value;
+    if (fromId === toId) { alert('From and To must be different components.'); return; }
+    const connectionIndex = appState.connections.length + 1;
+    changeRequests = [{ operation: 'add_connection', payload: {
+      connection_id: `conn_${String(connectionIndex).padStart(3, '0')}`,
+      from_component_id: fromId,
+      from_pin: getElement('remap-add-conn-from-pin').value.trim() || 'Out',
+      to_component_id: toId,
+      to_pin: getElement('remap-add-conn-to-pin').value.trim() || 'In',
+      current_amps: 1,
+      run_length_ft: 3,
+      wire_color: getElement('remap-add-conn-color').value,
+      circuit_type: getElement('remap-add-conn-circuit').value,
+    }}];
+  }
+
+  if (changeRequests.length === 0) return;
 
   showLoading(true);
   setStatus('Applying changes…');
@@ -741,7 +889,7 @@ async function applyRemap() {
       appState.projectProfile,
       appState.components,
       appState.connections,
-      remapJson
+      JSON.stringify(changeRequests)
     )();
 
     if (result.error) {

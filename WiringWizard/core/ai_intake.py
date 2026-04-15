@@ -17,8 +17,8 @@ from core.runtime_paths import resolve_runtime_app_dir
 # ── API Constants ──────────────────────────────────────────────────────────────
 
 AI_API_ENDPOINT = "https://models.inference.ai.azure.com/chat/completions"
-AI_MODEL = "gpt-4o-mini"
-AI_MAX_TOKENS = 2048
+AI_MODEL = "gpt-4o"
+AI_MAX_TOKENS = 8192
 
 # Lower temperature keeps wiring output structured and repeatable.
 AI_TEMPERATURE = 0.2
@@ -205,14 +205,73 @@ POWER_LOAD_TYPES = frozenset({
 # ── AI Prompt Templates ───────────────────────────────────────────────────────
 
 _AI_SYSTEM_PROMPT = (
-    "You are an expert electronics and automotive wiring engineer assistant for low-voltage projects. "
+    "You are an expert electronics and automotive wiring engineer assistant. "
     "Given a free-text project brief, you produce a structured wiring project draft as JSON. "
-    "Preserve the user's named products and modules as component_name values whenever possible. "
-    "If reference material is supplied, use it to identify modules, dashboards, keypads, harnesses, manuals, and pinouts. "
     "Your output MUST be a single valid JSON object and nothing else — no markdown fences, no prose. "
-    "Use conservative current values and realistic wire lengths for small maker projects. "
-    "Component IDs must be simple snake_case identifiers (e.g. battery1, arduino1). "
-    "Wire connections should only run from power-supplying components to consuming components."
+    "Component IDs must be simple snake_case identifiers (e.g. battery1, ecu1, fuse_box1). "
+    "Preserve the user's named products and modules as component_name values whenever possible. "
+    "If reference material is supplied, use it to identify modules, dashboards, keypads, harnesses, manuals, and pinouts.\n\n"
+
+    "AUTOMOTIVE POWER DISTRIBUTION:\n"
+    "Model realistic power distribution: Battery positive → main fuse → ignition switch → fuse box → relays → loads. "
+    "Not every load connects directly to the battery. "
+    "Always-hot circuits (clock, alarm, ECU keep-alive) tap before the ignition switch. "
+    "Ignition-ON circuits (ECU main, fuel pump, sensors) tap after the ignition switch in the RUN position. "
+    "Accessory circuits (radio, USB, interior lights) tap from the ACC position.\n\n"
+
+    "GROUND CONNECTIONS ARE MANDATORY:\n"
+    "Every component MUST have a ground return path — either to a chassis ground point or a ground bus bar. "
+    "Never omit ground wires. Use dedicated ground wires; do not assume chassis return unless the user specifies it. "
+    "Ground connections use circuit_type 'ground'.\n\n"
+
+    "FUSE PROTECTION:\n"
+    "Every power circuit MUST include an appropriately sized fuse. "
+    "Fuse rating should be approximately 125-150% of the circuit's maximum expected current draw. "
+    "Include the fuse as a component and wire it in-line on the power feed to each load or load group.\n\n"
+
+    "RELAY-CONTROLLED LOADS:\n"
+    "High-current loads drawing more than 5 amps (headlights, cooling fans, fuel pump, starter, horns) "
+    "MUST be switched through a relay. Wire the relay coil from the control source (switch, ECU output) "
+    "and the relay contacts on the high-current path from fused power to the load.\n\n"
+
+    "CAN BUS WIRING:\n"
+    "When the project includes CAN bus devices (ECUs, dashboards, keypads, body controllers), "
+    "wire CAN-H and CAN-L as a daisy-chained bus between all CAN nodes. "
+    "Place 120-ohm termination resistors at each physical end of the bus. "
+    "Use circuit_type 'can_bus' for CAN-H and CAN-L connections. "
+    "CAN wires should be a twisted pair (typically CAN-H = YELLOW, CAN-L = GREEN or BLUE).\n\n"
+
+    "PIN-LEVEL CONNECTIONS:\n"
+    "Specify actual pin names or numbers whenever the component datasheet or reference material provides them "
+    "(e.g. 'ECU Pin A1', 'Relay Pin 87', 'Sensor Pin SIG'). "
+    "When pin information is unavailable, use descriptive functional labels "
+    "(e.g. 'V+', 'GND', 'SIG_OUT', 'CAN_H', 'CAN_L', 'COIL+', 'NO', 'NC', 'COM').\n\n"
+
+    "WIRE COLORS:\n"
+    "Use standard automotive wire color conventions: "
+    "RED = +12V always-hot, YELLOW = +12V ignition-switched, ORANGE = +12V accessory, "
+    "BLACK = ground, WHITE/BLACK = ground return, BLUE = headlights/high-beam, "
+    "GREEN = CAN-L or right-turn, YELLOW/GREEN = CAN-H, "
+    "PINK or WHITE = signal/sensor wires, BROWN = tail/parking lights. "
+    "For non-automotive projects, use RED = V+, BLACK = GND, and distinct colors per signal.\n\n"
+
+    "SIGNAL vs POWER WIRES:\n"
+    "Distinguish signal wires (low-current analog/digital sensor lines, communication buses) from power wires. "
+    "Signal wires are typically 20-22 AWG; power wires are sized for the load current. "
+    "Use wire_gauge_awg 'auto' when the system should calculate gauge from current and run length.\n\n"
+
+    "RESPECT USER COMPONENT CHOICES:\n"
+    "Do NOT add components the user did not request. "
+    "If the user says one component handles multiple roles (e.g. 'KV8 handles engine and transmission'), "
+    "do NOT add a separate controller for the handled role. "
+    "If the user says to remove or exclude a component, do NOT include it. "
+    "Match the user's parts list exactly — only add required infrastructure "
+    "(fuses, relays, ground bus, termination resistors) that the user's build implicitly needs.\n\n"
+
+    "NON-AUTOMOTIVE PROJECTS:\n"
+    "For general electronics projects (CNC machines, 3D printers, home electrical, LED installations), "
+    "apply the same principles: proper power distribution from the supply through fusing to loads, "
+    "mandatory ground returns, relay control for high-current loads, and pin-level connections where known."
 )
 
 _AI_USER_PROMPT_TEMPLATE = (
@@ -226,27 +285,40 @@ _AI_USER_PROMPT_TEMPLATE = (
     "    {{\n"
     '      "component_id": "snake_case_id",\n'
     '      "component_name": "Human-Readable Name",\n'
-    '      "component_type": "battery|power_supply|microcontroller|ecu|relay|fuse|'
+    '      "component_type": "battery|power_supply|microcontroller|ecu|relay|fuse|fuse_box|'
+    'ground_bus|termination_resistor|ignition_switch|'
     'led_load|light|motor|servo|fan|pump|sensor|switch|display|buzzer|solenoid|stepper|motor_driver",\n'
     '      "current_draw_amps": number,\n'
-    '      "position_label": "location or TBD"\n'
+    '      "position_label": "location or TBD",\n'
+    '      "pins": ["pin1_name", "pin2_name"]\n'
     "    }}\n"
     "  ],\n"
     '  "connections": [\n'
     "    {{\n"
     '      "connection_id": "conn_001",\n'
     '      "from_component_id": "source_id",\n'
-    '      "from_pin": "pin label",\n'
-    '      "to_component_id": "load_id",\n'
-    '      "to_pin": "pin label",\n'
+    '      "from_pin": "specific pin name/number",\n'
+    '      "to_component_id": "destination_id",\n'
+    '      "to_pin": "specific pin name/number",\n'
     '      "current_amps": number,\n'
     '      "run_length_ft": number,\n'
-    '      "wire_color": "color"\n'
+    '      "wire_color": "color",\n'
+    '      "wire_gauge_awg": "number or auto",\n'
+    '      "circuit_type": "power_always_on|power_ignition|power_accessory|ground|signal_analog|signal_digital|can_bus|data"\n'
     "    }}\n"
     "  ],\n"
     '  "notes": ["string warning or tip", "..."]\n'
     "}}\n\n"
-    "Component IDs in connections MUST exactly match component_id values listed above."
+    "MANDATORY RULES — every output MUST satisfy ALL of these:\n"
+    "1. EVERY component MUST have at least one ground connection (circuit_type 'ground') back to a ground bus or chassis ground point.\n"
+    "2. CAN bus devices MUST have CAN-H and CAN-L connections (circuit_type 'can_bus') with 120-ohm termination resistors at each end of the bus.\n"
+    "3. High-current loads drawing more than 5A MUST route through a relay — wire the relay coil from the control source and relay contacts on the power path.\n"
+    "4. Every power connection MUST pass through an appropriately sized fuse (125-150%% of max expected current).\n"
+    "5. Do NOT add components the user did not ask for — respect their parts list exactly. Only add essential infrastructure (fuses, relays, ground bus, termination resistors).\n"
+    "6. If the user says one component handles multiple roles (e.g. 'KV8 handles engine and transmission'), do NOT add a separate controller for the handled role.\n"
+    "7. Pin names MUST be as specific as possible — use actual datasheet pin names/numbers when reference material is available; otherwise use descriptive functional labels (V+, GND, SIG_OUT, CAN_H, CAN_L, COIL+, NO, COM).\n"
+    "8. Component IDs in connections MUST exactly match component_id values listed in the components array.\n"
+    "9. List each component's known or expected pins in the 'pins' array so the diagram is self-documenting."
 )
 
 
@@ -796,3 +868,81 @@ def draft_project_from_brief(
 
     # AI unavailable, token missing, or AI returned an unusable response.
     return _run_fallback_parser(brief_text, requested_project_name)
+
+
+# ── AI Remap Prompt ───────────────────────────────────────────────────────────
+
+_AI_REMAP_SYSTEM_PROMPT = (
+    "You are an expert electronics and automotive wiring engineer. "
+    "You are given the current state of a wiring project (components and connections as JSON) "
+    "and a natural-language description of changes the user wants. "
+    "Return a JSON object with EXACTLY these two keys: "
+    '"components" (the FULL updated list) and "connections" (the FULL updated list). '
+    "Apply the requested changes — add, remove, or modify components and connections as described. "
+    "Preserve everything the user did NOT ask to change. "
+    "Output ONLY the JSON object — no markdown fences, no prose."
+)
+
+_AI_REMAP_USER_TEMPLATE = (
+    "CURRENT COMPONENTS:\n{components_json}\n\n"
+    "CURRENT CONNECTIONS:\n{connections_json}\n\n"
+    "REQUESTED CHANGES:\n{change_description}\n\n"
+    "Return the full updated JSON object with keys: components, connections."
+)
+
+
+def remap_project_with_ai(
+    components: List[Dict[str, Any]],
+    connections: List[Dict[str, Any]],
+    change_description: str,
+    api_token_override: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Use AI to apply natural-language change requests to an existing project.
+
+    Sends the current components/connections plus the user's description of desired
+    changes to the AI, which returns the full updated component and connection lists.
+
+    Args:
+        components:          Current list of component dicts.
+        connections:         Current list of connection dicts.
+        change_description:  Plain-English description of what the user wants to change.
+        api_token_override:  Optional GUI-provided bearer token.
+
+    Returns:
+        Dict with 'components' and 'connections' lists on success, or dict with 'error' key.
+    """
+    if not change_description.strip():
+        return {"error": "Describe what you want to change."}
+
+    resolved_override_token = (api_token_override or "").strip()
+    api_token = resolved_override_token or get_saved_gui_api_token() or resolve_api_token()
+    if not api_token:
+        return {"error": "No API token available. Set one in Settings."}
+
+    components_json = json.dumps(components, indent=2)[:4000]
+    connections_json = json.dumps(connections, indent=2)[:4000]
+
+    user_prompt = _AI_REMAP_USER_TEMPLATE.format(
+        components_json=components_json,
+        connections_json=connections_json,
+        change_description=change_description[:2000],
+    )
+
+    raw_response = _call_github_models_api(_AI_REMAP_SYSTEM_PROMPT, user_prompt, api_token)
+    if not raw_response:
+        return {"error": "AI service did not respond. Try again."}
+
+    parsed_response = _extract_json_from_response(raw_response)
+    if not isinstance(parsed_response, dict):
+        return {"error": "AI returned an unparseable response."}
+
+    has_valid_components = isinstance(parsed_response.get("components"), list)
+    has_valid_connections = isinstance(parsed_response.get("connections"), list)
+    if not has_valid_components or not has_valid_connections:
+        return {"error": "AI response was missing components or connections."}
+
+    return {
+        "components": parsed_response["components"],
+        "connections": parsed_response["connections"],
+    }

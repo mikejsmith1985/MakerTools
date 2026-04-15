@@ -632,6 +632,24 @@
           <textarea id="lib-raw-data" class="input-field input-textarea" rows="5"
             placeholder="Paste pinout from a datasheet, manual, or product page... e.g.&#10;Pin A1: B+ (12V power)&#10;Pin A2: PGND (power ground)&#10;Pin B1: CAN-H&#10;Pin B2: CAN-L"></textarea>
           <button class="btn-accent" id="btn-ai-parse-pins">🤖 Parse Pins with AI</button>
+
+          <div class="url-fetch-row">
+            <label for="lib-fetch-url">Or provide a documentation URL</label>
+            <div class="url-input-group">
+              <input type="url" id="lib-fetch-url" class="input-field"
+                placeholder="https://docs.emtronaustralia.com.au/engine-management/wiring/kv-series/" />
+              <button class="btn-accent" id="btn-fetch-url">🌐 Fetch &amp; Parse</button>
+            </div>
+            <p class="form-hint">Deep-crawls the page and linked sub-pages for pin/wiring data, then AI parses it.</p>
+          </div>
+
+          <div class="url-fetch-row">
+            <label>Or let AI search for it <span class="experimental-badge">Experimental</span></label>
+            <div class="url-input-group">
+              <button class="btn-accent btn-experimental" id="btn-auto-search">🔍 Auto-Search</button>
+            </div>
+            <p class="form-hint">Searches the web for the component name above, crawls top results for pin data. Works best with specific part numbers.</p>
+          </div>
         </div>
 
         <!-- Pin table -->

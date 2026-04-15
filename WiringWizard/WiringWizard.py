@@ -362,6 +362,98 @@ def _register_eel_endpoints() -> None:
             return {"error": str(parse_error)}
 
     @_eel.expose
+    def ai_fetch_and_parse_component(
+        component_name: str, component_url: str, token_override: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Deep-crawl a URL for pin/wiring data, then AI-parse into a structured component."""
+        try:
+            from core.ai_intake import (
+                fetch_url_for_component_data,
+                parse_component_data,
+                resolve_api_token,
+            )
+
+            # Step 1: Deep-crawl the URL to extract pin/wiring text.
+            crawl_result = fetch_url_for_component_data(component_url, component_name)
+            if crawl_result.get("error"):
+                return {"error": crawl_result["error"]}
+
+            extracted_text = crawl_result.get("extracted_text", "")
+            if not extracted_text.strip():
+                return {"error": "No meaningful text found at that URL. Try a more specific page."}
+
+            # Step 2: Feed the extracted text to AI for structured pin parsing.
+            resolved_token = (
+                (token_override or "").strip()
+                or get_saved_gui_api_token()
+                or resolve_api_token()
+            )
+            if not resolved_token:
+                return {"error": "No API token available. Set one in Settings."}
+
+            parsed_result = parse_component_data(component_name, extracted_text, resolved_token)
+            if parsed_result is None:
+                return {"error": "AI could not parse pin data from the crawled pages. Try pasting the data manually."}
+
+            return {
+                "parsed": parsed_result,
+                "crawl_stats": {
+                    "pages_crawled": crawl_result.get("pages_crawled", 0),
+                    "pages_with_pin_data": crawl_result.get("pages_with_pin_data", 0),
+                },
+            }
+        except Exception as fetch_parse_error:
+            return {"error": str(fetch_parse_error)}
+
+    @_eel.expose
+    def ai_auto_search_component(
+        component_name: str, token_override: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Experimental: search the web for component pin data and AI-parse it."""
+        try:
+            from core.ai_intake import (
+                auto_search_component_data,
+                parse_component_data,
+                resolve_api_token,
+            )
+
+            # Step 1: Search DuckDuckGo and crawl top results.
+            search_result = auto_search_component_data(component_name)
+            if search_result.get("error"):
+                return {"error": search_result["error"]}
+
+            extracted_text = search_result.get("extracted_text", "")
+            if not extracted_text.strip():
+                return {"error": "Search found pages but no meaningful content. Try providing a URL directly."}
+
+            # Step 2: Feed combined search results to AI for pin parsing.
+            resolved_token = (
+                (token_override or "").strip()
+                or get_saved_gui_api_token()
+                or resolve_api_token()
+            )
+            if not resolved_token:
+                return {"error": "No API token available. Set one in Settings."}
+
+            parsed_result = parse_component_data(component_name, extracted_text, resolved_token)
+            if parsed_result is None:
+                return {
+                    "error": "AI could not extract pins from search results. Try providing a direct URL or pasting data.",
+                }
+
+            return {
+                "parsed": parsed_result,
+                "search_stats": {
+                    "pages_crawled": search_result.get("pages_crawled", 0),
+                    "pages_with_pin_data": search_result.get("pages_with_pin_data", 0),
+                    "queries_run": len(search_result.get("search_queries", [])),
+                    "urls_found": len(search_result.get("result_urls", [])),
+                },
+            }
+        except Exception as auto_search_error:
+            return {"error": str(auto_search_error)}
+
+    @_eel.expose
     def ai_generate_connections(
         components_json: List[Dict[str, Any]],
         wiring_goal: str,

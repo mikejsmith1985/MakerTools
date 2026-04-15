@@ -39,16 +39,22 @@ class TestResolveRuntimeAppDir(unittest.TestCase):
         expected_dir = os.path.dirname(module_file_path)
         self.assertEqual(result_dir, expected_dir)
 
-    def test_frozen_mode_uses_sys_executable(self) -> None:
-        """When sys.frozen is set, the resolved dir should be the executable's directory."""
+    def test_frozen_mode_uses_stable_appdata_dir(self) -> None:
+        """When sys.frozen is set, the resolved dir should be the stable user data dir."""
         original_frozen = getattr(sys, "frozen", None)
-        original_executable = getattr(sys, "executable", None)
         try:
             sys.frozen = True
-            sys.executable = os.path.join("C:\\", "deploy", "WiringWizard.exe")
 
             result_dir = resolve_runtime_app_dir(__file__)
-            expected_dir = os.path.join("C:\\", "deploy")
+            # On Windows, should resolve to %APPDATA%\WiringWizard.
+            if sys.platform == "win32":
+                appdata = os.environ.get("APPDATA", "")
+                if appdata:
+                    expected_dir = os.path.join(appdata, "WiringWizard")
+                else:
+                    expected_dir = os.path.join(os.path.expanduser("~"), ".wiringwizard")
+            else:
+                expected_dir = os.path.join(os.path.expanduser("~"), ".wiringwizard")
             self.assertEqual(result_dir, expected_dir)
         finally:
             if original_frozen is None:
@@ -56,29 +62,6 @@ class TestResolveRuntimeAppDir(unittest.TestCase):
                     del sys.frozen
             else:
                 sys.frozen = original_frozen
-            if original_executable is not None:
-                sys.executable = original_executable
-
-    def test_frozen_mode_falls_back_when_executable_is_empty(self) -> None:
-        """If sys.frozen is set but executable is blank, fall back to module path."""
-        original_frozen = getattr(sys, "frozen", None)
-        original_executable = getattr(sys, "executable", None)
-        try:
-            sys.frozen = True
-            sys.executable = ""
-
-            module_file_path = os.path.abspath(__file__)
-            result_dir = resolve_runtime_app_dir(module_file_path)
-            expected_dir = os.path.dirname(module_file_path)
-            self.assertEqual(result_dir, expected_dir)
-        finally:
-            if original_frozen is None:
-                if hasattr(sys, "frozen"):
-                    del sys.frozen
-            else:
-                sys.frozen = original_frozen
-            if original_executable is not None:
-                sys.executable = original_executable
 
     def test_result_contains_no_trailing_separator(self) -> None:
         result_dir = resolve_runtime_app_dir(__file__)

@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WiringWizard — URL-to-Library Deep Crawl**: paste a documentation URL into the library editor and click "🌐 Fetch & Parse" to deep-crawl the page and linked sub-pages (up to 3 levels, 15 pages). Prioritises pages with pin/wiring tables, then sends extracted text to AI for structured pin parsing.
+- **WiringWizard — Auto-Search (Experimental)**: click "🔍 Auto-Search" in the library editor to have WiringWizard search the web for a component's pinout/datasheet by name. Searches DuckDuckGo with pin-focused queries, crawls top results, and feeds them to AI. Works best with specific part numbers. Marked experimental — results vary.
+- **WiringWizard — Stable User Data Directory**: in packaged (exe) builds, all user data (project drafts, component library, AI settings) is now stored in `%APPDATA%\WiringWizard` instead of next to the executable. Projects and library entries survive exe updates and relocations.
+
+### Added
 - **WiringWizard — Component Library**: persistent local component library with full CRUD operations (add, edit, delete, search by name/type). Ships with 5 starter components (battery, 6-way fuse box, ground bus, ignition switch, SPDT relay) including real pin definitions.
 - **WiringWizard — AI-Assisted Pin Parsing**: paste raw datasheet/manual text into the "Add to Library" modal and click "Parse Pins with AI" to auto-extract structured pin definitions. Users review and edit before saving.
 - **WiringWizard — Library-Aware Connection Generator**: new "AI Wire" toolbar button generates connections using ONLY verified pin data from the library, replacing the old approach of guessing pin-level wiring.

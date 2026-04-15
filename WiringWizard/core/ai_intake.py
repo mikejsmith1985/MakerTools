@@ -1503,7 +1503,440 @@ def draft_project_from_brief(
     return _run_fallback_parser(brief_text, requested_project_name)
 
 
-# ── AI Component Library Parser ──────────────────────────────────────────────
+# ── Deep URL Fetcher for Component Library ───────────────────────────────────
+# When the user provides a documentation URL (e.g. Emtron docs), this crawler
+# fetches the page, identifies pinout/wiring sub-pages, follows links up to
+# DEEP_CRAWL_MAX_DEPTH levels, and extracts structured text (especially tables)
+# that can be fed directly into the AI component parser.
+
+DEEP_CRAWL_MAX_DEPTH = 3
+DEEP_CRAWL_MAX_PAGES = 15
+DEEP_CRAWL_TIMEOUT_SECONDS = 15
+
+# Keywords that identify links worth following deeper into a documentation site.
+_DEEP_CRAWL_LINK_KEYWORDS: Tuple[str, ...] = (
+    "pinout", "pin out", "wiring", "connector", "datasheet", "data sheet",
+    "hardware manual", "installation", "harness", "specifications", "specs",
+    "power supply", "power distribution", "ecu", "ecm", "lambda", "auxiliary",
+    "inputs", "outputs", "channels", "ground", "sensor", "signal",
+)
+
+# Patterns that mark a page as containing actual pin/wiring data worth extracting.
+_PIN_DATA_INDICATORS = re.compile(
+    r"(pin\s+\d|connector\s+[a-d]|channel\s+name|"
+    r"pin\s+channel|pin\s+description|"
+    r"\bpin\b.*\bname\b|\bA\d{1,2}\b.*\bB\d{1,2}\b|"
+    r"injection\s+channel|ignition\s+channel|auxiliary\s+output|"
+    r"analog\s+input|digital\s+input|lambda\s+\d|"
+    r"crank.*sensor|sync.*sensor|knock\s+\d|"
+    r"can\s*[12]?[hl]|efi\s+relay|sensor\s+supply|"
+    r"ecu\s+ground|sensor\s+0v)",
+    re.IGNORECASE,
+)
+
+
+def _fetch_page_html(page_url: str) -> Optional[str]:
+    """Fetch a single HTML page with a generous timeout for documentation sites."""
+    http_request = urllib.request.Request(
+        page_url,
+        headers={"User-Agent": "WiringWizard/2.0 ComponentLibrary"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=DEEP_CRAWL_TIMEOUT_SECONDS) as response:
+            return response.read().decode("utf-8", errors="ignore")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError) as fetch_error:
+        _log(f"  Deep crawl fetch failed for {page_url}: {fetch_error}")
+        return None
+
+
+def _extract_text_from_html(page_html: str) -> str:
+    """Convert HTML to clean text, preserving table structure as pipe-delimited rows.
+
+    Documentation sites embed pin data in <table> elements. This function
+    extracts table rows first (formatted as "cell1 | cell2 | cell3"), then
+    falls back to general text extraction for non-table content like headings,
+    list items, and paragraphs.
+    """
+    extracted_sections: List[str] = []
+
+    # ── 1. Extract tables (the primary source of pin data) ────────────────
+    table_pattern = re.compile(r"<table[^>]*>(.*?)</table>", re.IGNORECASE | re.DOTALL)
+    row_pattern = re.compile(r"<tr[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+    cell_pattern = re.compile(r"<t[dh][^>]*>(.*?)</t[dh]>", re.IGNORECASE | re.DOTALL)
+
+    for table_match in table_pattern.finditer(page_html):
+        table_rows: List[str] = []
+        for row_match in row_pattern.finditer(table_match.group(1)):
+            cells = cell_pattern.findall(row_match.group(1))
+            if cells:
+                cleaned_cells = [_normalize_reference_text(cell_html) for cell_html in cells]
+                # Skip empty rows or rows with only whitespace cells.
+                if any(cell.strip() for cell in cleaned_cells):
+                    table_rows.append(" | ".join(cleaned_cells))
+        if table_rows:
+            extracted_sections.append("\n".join(table_rows))
+
+    # ── 2. Extract headings (section markers) ─────────────────────────────
+    heading_pattern = re.compile(r"<h[1-6][^>]*>(.*?)</h[1-6]>", re.IGNORECASE | re.DOTALL)
+    for heading_match in heading_pattern.finditer(page_html):
+        heading_text = _normalize_reference_text(heading_match.group(1)).strip()
+        if heading_text and len(heading_text) > 2:
+            extracted_sections.append(f"\n## {heading_text}")
+
+    # ── 3. Extract list items (spec bullets, feature lists) ───────────────
+    list_item_pattern = re.compile(r"<li[^>]*>(.*?)</li>", re.IGNORECASE | re.DOTALL)
+    for list_match in list_item_pattern.finditer(page_html):
+        item_text = _normalize_reference_text(list_match.group(1)).strip()
+        if 3 < len(item_text) < 500:
+            extracted_sections.append(f"• {item_text}")
+
+    # ── 4. Extract paragraphs (descriptive text, notes, warnings) ─────────
+    paragraph_pattern = re.compile(r"<p[^>]*>(.*?)</p>", re.IGNORECASE | re.DOTALL)
+    for para_match in paragraph_pattern.finditer(page_html):
+        para_text = _normalize_reference_text(para_match.group(1)).strip()
+        if 10 < len(para_text) < 1000:
+            extracted_sections.append(para_text)
+
+    return "\n".join(extracted_sections)
+
+
+def _extract_sub_links(page_html: str, base_url: str) -> List[Tuple[str, str]]:
+    """Find links on a page that are likely to contain pin/wiring data.
+
+    Returns a list of (link_text, absolute_url) tuples, filtered to only
+    include links whose text or URL matches deep crawl keywords.
+    """
+    discovered_links: List[Tuple[str, str]] = []
+    seen_urls: set = set()
+
+    for relative_url, anchor_html in REFERENCE_LINK_PATTERN.findall(page_html):
+        anchor_text = _normalize_reference_text(anchor_html).strip()
+        searchable_text = f"{anchor_text} {relative_url}".lower()
+
+        if not any(keyword in searchable_text for keyword in _DEEP_CRAWL_LINK_KEYWORDS):
+            continue
+
+        absolute_url = urljoin(base_url, relative_url)
+
+        # Skip anchors, external sites, and non-HTML resources.
+        if absolute_url in seen_urls:
+            continue
+        if "#" in absolute_url.split("/")[-1] and not absolute_url.endswith("/"):
+            # Allow fragment-free URLs but skip pure anchor links.
+            clean_url = absolute_url.split("#")[0]
+            if clean_url in seen_urls:
+                continue
+            absolute_url = clean_url
+        if not absolute_url.startswith(base_url.split("/")[0] + "//" + base_url.split("//")[1].split("/")[0]):
+            continue  # Stay on the same domain.
+
+        seen_urls.add(absolute_url)
+        discovered_links.append((anchor_text or absolute_url, absolute_url))
+
+    return discovered_links
+
+
+def _has_pin_data(page_text: str) -> bool:
+    """Check whether extracted page text likely contains pin/wiring information."""
+    return bool(_PIN_DATA_INDICATORS.search(page_text))
+
+
+def fetch_url_for_component_data(
+    component_url: str,
+    component_name: str = "",
+) -> Dict[str, Any]:
+    """Deep-crawl a documentation URL to extract component pin/wiring data.
+
+    Starting from the provided URL, this function:
+    1. Fetches and extracts text from the initial page.
+    2. Identifies sub-links that match pinout/wiring keywords.
+    3. Follows those links up to DEEP_CRAWL_MAX_DEPTH levels.
+    4. Prioritises pages that contain actual pin data (table rows with pin
+       numbers, connector names, channel assignments).
+    5. Returns the combined extracted text, ready to feed into AI Parse.
+
+    Args:
+        component_url: Starting URL (e.g. an Emtron docs page).
+        component_name: Optional component name for logging context.
+
+    Returns:
+        Dict with keys:
+            extracted_text (str): Combined text from all crawled pages.
+            pages_crawled (int): Number of pages successfully fetched.
+            pages_with_pin_data (int): Pages that contained pin information.
+            crawled_urls (list): URLs that were fetched.
+            error (str): Error message if the initial fetch fails.
+    """
+    _log(f"Deep crawl starting: {component_url} (name={component_name})")
+
+    initial_html = _fetch_page_html(component_url)
+    if not initial_html:
+        _log("  Deep crawl: initial fetch failed")
+        return {
+            "extracted_text": "",
+            "pages_crawled": 0,
+            "pages_with_pin_data": 0,
+            "crawled_urls": [],
+            "error": f"Could not fetch {component_url}. Check the URL and try again.",
+        }
+
+    # Track all pages we visit to avoid loops.
+    visited_urls: set = {component_url}
+    # Queue of (url, depth) to process.
+    crawl_queue: List[Tuple[str, int]] = []
+    # Results: list of (url, page_text, has_pins) tuples.
+    crawl_results: List[Tuple[str, str, bool]] = []
+
+    # Process the initial page.
+    initial_text = _extract_text_from_html(initial_html)
+    initial_has_pins = _has_pin_data(initial_text)
+    crawl_results.append((component_url, initial_text, initial_has_pins))
+    _log(f"  Initial page: {len(initial_text)} chars, has_pins={initial_has_pins}")
+
+    # Discover sub-links from the initial page.
+    sub_links = _extract_sub_links(initial_html, component_url)
+    _log(f"  Found {len(sub_links)} relevant sub-links")
+    for link_text, link_url in sub_links:
+        if link_url not in visited_urls:
+            crawl_queue.append((link_url, 1))
+            _log(f"    Queued: {link_text} → {link_url}")
+
+    # Crawl sub-pages breadth-first up to the depth and page limits.
+    while crawl_queue and len(crawl_results) < DEEP_CRAWL_MAX_PAGES:
+        current_url, current_depth = crawl_queue.pop(0)
+        if current_url in visited_urls:
+            continue
+        visited_urls.add(current_url)
+
+        _log(f"  Crawling depth={current_depth}: {current_url}")
+        page_html = _fetch_page_html(current_url)
+        if not page_html:
+            continue
+
+        page_text = _extract_text_from_html(page_html)
+        page_has_pins = _has_pin_data(page_text)
+        crawl_results.append((current_url, page_text, page_has_pins))
+        _log(f"    Got {len(page_text)} chars, has_pins={page_has_pins}")
+
+        # Follow deeper links only if we haven't reached the depth limit.
+        if current_depth < DEEP_CRAWL_MAX_DEPTH:
+            deeper_links = _extract_sub_links(page_html, current_url)
+            for link_text, link_url in deeper_links:
+                if link_url not in visited_urls and len(crawl_queue) < DEEP_CRAWL_MAX_PAGES * 3:
+                    crawl_queue.append((link_url, current_depth + 1))
+
+    # Assemble the final text, prioritising pages with actual pin data.
+    pin_data_pages = [(url, text) for url, text, has_pins in crawl_results if has_pins]
+    other_pages = [(url, text) for url, text, has_pins in crawl_results if not has_pins]
+
+    combined_sections: List[str] = []
+    if component_name:
+        combined_sections.append(f"# Component: {component_name}\n")
+
+    for page_url, page_text in pin_data_pages:
+        page_label = page_url.split("/")[-2] if page_url.endswith("/index.html") else page_url.split("/")[-1]
+        combined_sections.append(f"\n--- PIN DATA: {page_label} ---\n{page_text}")
+
+    for page_url, page_text in other_pages:
+        page_label = page_url.split("/")[-2] if page_url.endswith("/index.html") else page_url.split("/")[-1]
+        combined_sections.append(f"\n--- REFERENCE: {page_label} ---\n{page_text}")
+
+    combined_text = "\n".join(combined_sections)
+    pages_with_pin_data_count = len(pin_data_pages)
+
+    _log(
+        f"  Deep crawl complete: {len(crawl_results)} pages, "
+        f"{pages_with_pin_data_count} with pin data, "
+        f"{len(combined_text)} chars total"
+    )
+
+    return {
+        "extracted_text": combined_text,
+        "pages_crawled": len(crawl_results),
+        "pages_with_pin_data": pages_with_pin_data_count,
+        "crawled_urls": [url for url, _, _ in crawl_results],
+        "error": "",
+    }
+
+
+# ── Experimental: Auto-Search by Component Name ─────────────────────────────
+# Searches DuckDuckGo for a component's pinout/datasheet, deep-crawls the top
+# results, and returns combined text ready for AI parsing.  Marked experimental
+# because search quality varies and may miss niche or one-off components.
+
+AUTO_SEARCH_MAX_QUERIES = 2
+AUTO_SEARCH_MAX_RESULTS_PER_QUERY = 3
+AUTO_SEARCH_MAX_CRAWL_PAGES = 8
+
+# Search query templates — the component name is interpolated into each one.
+_AUTO_SEARCH_QUERY_TEMPLATES: Tuple[str, ...] = (
+    "{name} pinout wiring diagram datasheet",
+    "{name} pin assignment connector specifications",
+)
+
+# Domains we skip because they never contain useful pin-level data.
+_AUTO_SEARCH_BLOCKED_DOMAINS: Tuple[str, ...] = (
+    "youtube.com", "facebook.com", "instagram.com", "tiktok.com",
+    "twitter.com", "x.com", "pinterest.com", "amazon.com",
+    "ebay.com", "aliexpress.com",
+)
+
+
+def _is_blocked_domain(url: str) -> bool:
+    """Return True if the URL belongs to a domain unlikely to contain pin data."""
+    url_lower = url.lower()
+    return any(domain in url_lower for domain in _AUTO_SEARCH_BLOCKED_DOMAINS)
+
+
+def auto_search_component_data(
+    component_name: str,
+) -> Dict[str, Any]:
+    """Search the web for a component's pinout/datasheet and deep-crawl results.
+
+    This is an **experimental** feature.  It runs DuckDuckGo searches with
+    pinout-focused queries, filters out irrelevant domains, then deep-crawls
+    the most promising result pages using the same infrastructure as the
+    URL-to-Library feature.
+
+    Args:
+        component_name: Human-readable component name (e.g. "Emtron KV8 ECU").
+
+    Returns:
+        Dict with keys:
+            extracted_text (str): Combined text from all crawled result pages.
+            pages_crawled (int): Total pages successfully fetched.
+            pages_with_pin_data (int): Pages that contained pin information.
+            search_queries (list): Queries that were executed.
+            result_urls (list): URLs that were found and crawled.
+            error (str): Error message if no results were found.
+    """
+    _log(f"Auto-search starting for: {component_name}")
+
+    if not component_name.strip():
+        return {
+            "extracted_text": "",
+            "pages_crawled": 0,
+            "pages_with_pin_data": 0,
+            "search_queries": [],
+            "result_urls": [],
+            "error": "Component name is required for auto-search.",
+        }
+
+    # Step 1: Run multiple search queries to cast a wider net.
+    all_result_urls: List[str] = []
+    executed_queries: List[str] = []
+    seen_urls: set = set()
+
+    for template in _AUTO_SEARCH_QUERY_TEMPLATES[:AUTO_SEARCH_MAX_QUERIES]:
+        search_query = template.format(name=component_name)
+        executed_queries.append(search_query)
+        _log(f"  Auto-search query: {search_query}")
+
+        results = _search_ddg(search_query)
+        for title, result_url, snippet in results[:AUTO_SEARCH_MAX_RESULTS_PER_QUERY]:
+            if result_url in seen_urls:
+                continue
+            if _is_blocked_domain(result_url):
+                _log(f"    Skipped blocked domain: {result_url}")
+                continue
+            seen_urls.add(result_url)
+            all_result_urls.append(result_url)
+            _log(f"    Found: {title} → {result_url}")
+
+    if not all_result_urls:
+        _log("  Auto-search: no usable results found")
+        return {
+            "extracted_text": "",
+            "pages_crawled": 0,
+            "pages_with_pin_data": 0,
+            "search_queries": executed_queries,
+            "result_urls": [],
+            "error": (
+                f"No relevant search results found for \"{component_name}\". "
+                "Try a more specific name, part number, or provide a URL directly."
+            ),
+        }
+
+    # Step 2: Deep-crawl each result URL (reusing the existing crawler).
+    # Each URL gets a shallow crawl (depth 1 only) to stay fast.
+    combined_sections: List[str] = [f"# Auto-Search: {component_name}\n"]
+    total_pages_crawled = 0
+    total_pages_with_pins = 0
+    crawled_urls: List[str] = []
+
+    for result_url in all_result_urls:
+        if total_pages_crawled >= AUTO_SEARCH_MAX_CRAWL_PAGES:
+            break
+
+        _log(f"  Auto-search crawling: {result_url}")
+        page_html = _fetch_page_html(result_url)
+        if not page_html:
+            continue
+
+        page_text = _extract_text_from_html(page_html)
+        page_has_pins = _has_pin_data(page_text)
+        total_pages_crawled += 1
+        crawled_urls.append(result_url)
+
+        if page_has_pins:
+            total_pages_with_pins += 1
+
+        # Follow one level of sub-links for pin-relevant pages.
+        sub_link_texts: List[str] = []
+        if total_pages_crawled < AUTO_SEARCH_MAX_CRAWL_PAGES:
+            sub_links = _extract_sub_links(page_html, result_url)
+            for link_text, link_url in sub_links[:3]:
+                if link_url in seen_urls or total_pages_crawled >= AUTO_SEARCH_MAX_CRAWL_PAGES:
+                    break
+                seen_urls.add(link_url)
+                sub_html = _fetch_page_html(link_url)
+                if not sub_html:
+                    continue
+                sub_text = _extract_text_from_html(sub_html)
+                sub_has_pins = _has_pin_data(sub_text)
+                total_pages_crawled += 1
+                crawled_urls.append(link_url)
+                if sub_has_pins:
+                    total_pages_with_pins += 1
+                    sub_link_texts.append(f"\n--- PIN DATA (sub-page) ---\n{sub_text}")
+                else:
+                    sub_link_texts.append(f"\n--- REFERENCE (sub-page) ---\n{sub_text}")
+
+        # Add this result's content — pin data pages first.
+        page_label = result_url.split("//")[-1][:80]
+        if page_has_pins:
+            combined_sections.append(f"\n--- PIN DATA: {page_label} ---\n{page_text}")
+        else:
+            combined_sections.append(f"\n--- REFERENCE: {page_label} ---\n{page_text}")
+        combined_sections.extend(sub_link_texts)
+
+    combined_text = "\n".join(combined_sections)
+
+    _log(
+        f"  Auto-search complete: {total_pages_crawled} pages, "
+        f"{total_pages_with_pins} with pin data, "
+        f"{len(combined_text)} chars total"
+    )
+
+    if total_pages_crawled == 0:
+        return {
+            "extracted_text": "",
+            "pages_crawled": 0,
+            "pages_with_pin_data": 0,
+            "search_queries": executed_queries,
+            "result_urls": all_result_urls,
+            "error": "Found search results but couldn't fetch any pages. Try providing a URL directly.",
+        }
+
+    return {
+        "extracted_text": combined_text,
+        "pages_crawled": total_pages_crawled,
+        "pages_with_pin_data": total_pages_with_pins,
+        "search_queries": executed_queries,
+        "result_urls": crawled_urls,
+        "error": "",
+    }
 
 _COMPONENT_PARSE_SYSTEM_PROMPT = (
     "You are an expert electronics engineer who reads datasheets, manuals, and "

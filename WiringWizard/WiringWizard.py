@@ -181,7 +181,7 @@ def _register_eel_endpoints() -> None:
         """Run the AI intake pipeline and return a structured draft dictionary."""
         try:
             draft_result = draft_project_from_brief(
-                brief_text, project_name, token_override=token_override
+                brief_text, project_name, api_token_override=token_override
             )
             return draft_result
         except Exception as draft_error:

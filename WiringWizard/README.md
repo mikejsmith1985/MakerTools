@@ -2,27 +2,39 @@
 
 **Build wiring diagrams and harness plans for low-voltage maker projects.**
 
-WiringWizard is a standalone desktop app that helps you plan wiring safely and clearly. You describe your project, components, and goals, and it generates:
+WiringWizard is a standalone desktop app that helps you plan wiring safely and clearly. You describe your project, add components with real pin data, and it generates:
 
-- ASCII wiring diagram output
+- Interactive SVG wiring diagram with pin-level connections
 - Connection table with wire details
 - Wire gauge/length suggestions
 - Fuse/relay, connector, and tooling recommendations
 - Step-by-step instructions written in simple language
-- Re-map workflow for iterative changes
+- Component Library with AI-assisted pin parsing
+- AI Wire generation using verified pin data
 
-## V1 Scope
+## V2 — Component Library Architecture
 
-WiringWizard v1 is designed for **low-voltage systems**, including:
+WiringWizard v2 uses a **Component Library** to produce accurate, pin-level wiring diagrams:
+
+1. **You provide real component data** — paste pinout tables from datasheets, manuals, or product pages
+2. **AI structures it** — click "Parse Pins with AI" and it extracts pin definitions into an editable table
+3. **You verify and save** — review the parsed pins, correct any errors, save to your local library
+4. **AI generates connections** — the "AI Wire" feature routes connections using ONLY verified pin data
+5. **Diagram shows real pins** — component cards display all defined pins, color-coded by type
+
+This approach replaces the v1 method where AI tried to guess pin-level wiring for components it didn't know.
+
+### Supported domains
 
 - Automotive harness planning
 - CNC control wiring
 - 3D printer electronics
+- Home electronics (low-voltage)
 - Similar low-voltage control projects
 
 ### Household mains (important)
 
-For home electrical mains (120V/240V), WiringWizard v1 provides **checklist-only safety guidance** and **does not generate full mains wiring plans**. Use a licensed electrician for mains work.
+For home electrical mains (120V/240V), WiringWizard provides **checklist-only safety guidance** and **does not generate full mains wiring plans**. Use a licensed electrician for mains work.
 
 ## Start WiringWizard
 
@@ -57,34 +69,47 @@ python WiringWizard.py
 
 ## Basic Workflow
 
+1. **Open the Component Library** (📚 button) — browse starter components or add your own
+2. **Add components to your library** — paste datasheet text, click "Parse Pins with AI", review and save
+3. **Add library components to your project** — click 📚 in the sidebar to pick from your library
+4. **AI Wire** — click ⚡ AI Wire, describe your wiring goal, and AI generates connections using real pins
+5. **Review diagram** — component cards show all pins, color-coded by type; wires connect specific pins
+6. **Generate Wiring Plan** — get BOM, step-by-step instructions, and recommendations
+7. **Iterate** — use Re-map to refine, or add/edit components and re-wire
+
+### Legacy workflow (still supported)
+
 1. Enter your project profile (name, domain, voltage class)
-2. (Optional) In **AI Assist**, save your GitHub Models token once
-3. Type a brief and click **AI Draft from Brief** (or paste/edit JSON manually)
-4. Review and adjust components and connections
-5. Click **Generate Wiring Plan**
-6. Review diagram, table, BOM, and step-by-step outputs
-7. Use Re-map Changes to refine and regenerate
+2. Use **AI Assist** to draft components from a text brief
+3. Manually adjust components and connections
+4. Click **Generate Wiring Plan**
 
-## AI Assist
+## AI Features
 
-The **AI Assist** panel sits at the top of the **Project Intake** tab. Type a plain-English
-project brief (e.g. *"Arduino Nano fan controller powered by a 12 V battery with a relay
-switch"*) and click **AI Draft from Brief**.
+### Component Library + AI Pin Parser
 
-### How it works
+The **Component Library** is a persistent local database of components with verified pin definitions. When adding a new component:
 
-1. **If an API token is available** — WiringWizard calls the GitHub Models API
-   (`gpt-4o-mini`) and asks it to produce a structured component/connection draft.
-   The status bar shows **✓ AI draft applied.** when this succeeds.
+1. Enter the component name and paste raw data (pinout table, datasheet text, manual excerpts)
+2. Click **🤖 Parse Pins with AI** — the AI extracts structured pin definitions
+3. Review the editable pin table — correct any errors, add missing pins
+4. Save to the library — the component is now available for all future projects
 
-2. **If no token is set or the API call fails** — a deterministic keyword parser scans
-   the brief for known low-voltage component terms (battery, Arduino, relay, LED, motor,
-   fan, sensor, etc.) and builds a plausible starter set of components and power
-   connections automatically. The status bar shows that the fallback parser was used.
+The library ships with 5 starter components (battery, fuse box, ground bus, ignition switch, relay).
 
-Either way, the generated draft is written into the **Project Name**, **Description**,
-**Components**, and **Connections** fields. You can edit any field before clicking
-**Generate Wiring Plan**.
+### AI Wire Generation
+
+The **⚡ AI Wire** feature generates connections between project components using ONLY their verified pin data:
+
+1. Add components from your library to the project
+2. Click AI Wire in the toolbar
+3. Describe your wiring goal in plain English
+4. AI generates connections — each wire references specific pin IDs from your library data
+5. Invalid connections (referencing non-existent pins) are automatically filtered out
+
+### AI Assist (legacy)
+
+The **AI Assist** panel provides a quick-draft workflow: type a plain-English project brief and click **AI Draft from Brief**. This uses GPT-4o to generate a starter set of components and connections. Note: these components won't have library pin data unless you add them to the library separately.
 
 ### Setting up the AI token
 
@@ -105,14 +130,9 @@ A GitHub personal access token with **GitHub Models** access works for all three
 
 ### Important safety notes
 
-- **Always verify pinouts** — AI-generated component connections show likely pin labels
-  but cannot know your specific hardware revision.
-- **Check current ratings** — Default current values are conservative estimates; confirm
-  against your component datasheets.
-- **Add ground returns** — The draft includes positive supply connections; you must add
-  ground return wires for each load.
-- **Never use the draft for mains wiring** — WiringWizard is scoped to low-voltage
-  systems only. Consult a licensed electrician for household mains work.
+- **Verify all pin data** — AI pin parsing is a starting point. Always confirm against the actual datasheet before wiring.
+- **Check current ratings** — Default current values are conservative estimates; confirm against your component datasheets.
+- **Never use for mains wiring** — WiringWizard is scoped to low-voltage systems only. Consult a licensed electrician for household mains work.
 
 ## Run Tests
 

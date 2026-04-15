@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from core.project_schema import (
     Component, Connection, ProjectProfile, WiringProject,
+    Pin, LibraryComponent, PIN_TYPES,
     SUPPORTED_DOMAINS, SUPPORTED_VOLTAGE_CLASSES,
 )
 
@@ -127,6 +128,98 @@ class TestWiringProject(unittest.TestCase):
         profile = ProjectProfile('P', 'automotive', 'lv_12v')
         project = WiringProject(profile=profile)
         self.assertEqual(project.connections, [])
+
+
+class TestPin(unittest.TestCase):
+    """Tests for the Pin dataclass added in v2.0."""
+
+    def test_pin_stores_all_fields(self):
+        pin = Pin(pin_id='A1', name='B+', pin_type='power_input', description='12V main power')
+        self.assertEqual(pin.pin_id, 'A1')
+        self.assertEqual(pin.name, 'B+')
+        self.assertEqual(pin.pin_type, 'power_input')
+        self.assertEqual(pin.description, '12V main power')
+
+    def test_pin_defaults(self):
+        pin = Pin(pin_id='X', name='Test')
+        self.assertEqual(pin.pin_type, 'general')
+        self.assertEqual(pin.description, '')
+
+    def test_pin_types_constant_has_expected_types(self):
+        self.assertIn('power_input', PIN_TYPES)
+        self.assertIn('ground', PIN_TYPES)
+        self.assertIn('can_high', PIN_TYPES)
+        self.assertIn('can_low', PIN_TYPES)
+        self.assertIn('pwm_output', PIN_TYPES)
+        self.assertIn('general', PIN_TYPES)
+
+
+class TestLibraryComponent(unittest.TestCase):
+    """Tests for the LibraryComponent dataclass round-trip serialization."""
+
+    def _make_component(self):
+        return LibraryComponent(
+            library_id='test-ecu',
+            name='Test ECU',
+            manufacturer='Acme',
+            part_number='ECU-100',
+            component_type='ecu',
+            voltage_nominal=12.0,
+            current_draw_amps=5.0,
+            pins=[
+                Pin('A1', 'B+', 'power_input', 'Main power'),
+                Pin('A2', 'GND', 'ground', 'Power ground'),
+                Pin('B1', 'CAN-H', 'can_high', 'CAN bus high'),
+            ],
+            notes='Test notes',
+        )
+
+    def test_to_dict_returns_serializable_dict(self):
+        comp = self._make_component()
+        result = comp.to_dict()
+        self.assertEqual(result['library_id'], 'test-ecu')
+        self.assertEqual(result['name'], 'Test ECU')
+        self.assertIsInstance(result['pins'], list)
+        self.assertEqual(len(result['pins']), 3)
+        self.assertEqual(result['pins'][0]['pin_id'], 'A1')
+
+    def test_from_dict_round_trip(self):
+        original = self._make_component()
+        data = original.to_dict()
+        restored = LibraryComponent.from_dict(data)
+        self.assertEqual(restored.library_id, original.library_id)
+        self.assertEqual(restored.name, original.name)
+        self.assertEqual(len(restored.pins), 3)
+        self.assertEqual(restored.pins[2].pin_type, 'can_high')
+
+    def test_find_pin_returns_matching_pin(self):
+        comp = self._make_component()
+        pin = comp.find_pin('A2')
+        self.assertIsNotNone(pin)
+        self.assertEqual(pin.name, 'GND')
+
+    def test_find_pin_returns_none_for_missing(self):
+        comp = self._make_component()
+        self.assertIsNone(comp.find_pin('Z99'))
+
+    def test_pins_by_type_filters_correctly(self):
+        comp = self._make_component()
+        ground_pins = comp.pins_by_type('ground')
+        self.assertEqual(len(ground_pins), 1)
+        self.assertEqual(ground_pins[0].pin_id, 'A2')
+
+    def test_component_dataclass_has_pins_field(self):
+        """Project Component now carries optional pin data from the library."""
+        comp = Component(
+            component_id='kv8',
+            component_name='Emtron KV8',
+            component_type='ecu',
+            current_draw_amps=5.0,
+            pins=[Pin('A1', 'B+', 'power_input')],
+            library_id='emtron-kv8',
+        )
+        self.assertEqual(len(comp.pins), 1)
+        self.assertEqual(comp.library_id, 'emtron-kv8')
 
 
 if __name__ == '__main__':

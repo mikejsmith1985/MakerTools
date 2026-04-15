@@ -1,3 +1,6 @@
 # Runtime data — never commit
 ai_debug.log
+ai_settings.json
 user_settings.json
+component_library.json
+project_draft.json

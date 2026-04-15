@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **WiringWizard — URL-to-Library Deep Crawl**: paste a documentation URL into the library editor and click "🌐 Fetch & Parse" to deep-crawl the page and linked sub-pages (up to 3 levels, 15 pages). Prioritises pages with pin/wiring tables, then sends extracted text to AI for structured pin parsing.
+- **WiringWizard — Auto-Search (Experimental)**: click "🔍 Auto-Search" in the library editor to have WiringWizard search the web for a component's pinout/datasheet by name. Searches DuckDuckGo with pin-focused queries, crawls top results, and feeds them to AI. Works best with specific part numbers. Marked experimental — results vary.
 - **WiringWizard — Stable User Data Directory**: in packaged (exe) builds, all user data (project drafts, component library, AI settings) is now stored in `%APPDATA%\WiringWizard` instead of next to the executable. Projects and library entries survive exe updates and relocations.
 
 ### Added

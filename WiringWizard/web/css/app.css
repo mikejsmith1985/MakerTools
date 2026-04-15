@@ -993,6 +993,25 @@ body {
   margin-top: 4px;
   margin-bottom: 0;
 }
+.experimental-badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+.btn-experimental {
+  background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+}
+.btn-experimental:hover {
+  background: linear-gradient(135deg, #d97706, #b45309) !important;
+}
 
 /* Library toolbar — search bar and filter row */
 .library-toolbar {

@@ -16,6 +16,8 @@ from core.ai_intake import (
     _extract_text_from_html,
     _extract_sub_links,
     _has_pin_data,
+    _is_blocked_domain,
+    auto_search_component_data,
     fetch_url_for_component_data,
 )
 
@@ -246,6 +248,95 @@ class TestFetchUrlForComponentData(unittest.TestCase):
         mock_fetch.return_value = "<html><body><p>Simple page with enough content for extraction purposes.</p></body></html>"
         result = fetch_url_for_component_data("https://example.com/test/", "Widget")
         self.assertIn("https://example.com/test/", result["crawled_urls"])
+
+
+# ── Auto-Search Tests ────────────────────────────────────────────────────────
+
+
+class TestIsBlockedDomain(unittest.TestCase):
+    """Verify that irrelevant domains are filtered out of search results."""
+
+    def test_blocks_youtube(self) -> None:
+        self.assertTrue(_is_blocked_domain("https://www.youtube.com/watch?v=abc"))
+
+    def test_blocks_amazon(self) -> None:
+        self.assertTrue(_is_blocked_domain("https://amazon.com/dp/B001234"))
+
+    def test_allows_documentation_site(self) -> None:
+        self.assertFalse(_is_blocked_domain("https://docs.emtronaustralia.com.au/"))
+
+    def test_allows_forum_site(self) -> None:
+        self.assertFalse(_is_blocked_domain("https://www.dsmtuners.com/threads/pinout"))
+
+
+class TestAutoSearchComponentData(unittest.TestCase):
+    """Verify the experimental auto-search orchestrator with mocked HTTP and DDG."""
+
+    def test_returns_error_for_empty_name(self) -> None:
+        result = auto_search_component_data("  ")
+        self.assertTrue(result["error"])
+        self.assertEqual(result["pages_crawled"], 0)
+
+    @patch("core.ai_intake._search_ddg")
+    def test_returns_error_when_no_search_results(self, mock_ddg: MagicMock) -> None:
+        mock_ddg.return_value = []
+        result = auto_search_component_data("Nonexistent Widget XYZ-999")
+        self.assertTrue(result["error"])
+        self.assertIn("No relevant search results", result["error"])
+        self.assertGreater(len(result["search_queries"]), 0)
+
+    @patch("core.ai_intake._fetch_page_html")
+    @patch("core.ai_intake._search_ddg")
+    def test_crawls_search_results_successfully(
+        self, mock_ddg: MagicMock, mock_fetch: MagicMock
+    ) -> None:
+        """When DDG returns results, the crawler should fetch and extract text."""
+        mock_ddg.return_value = [
+            ("Emtron KV8 Pinout", "https://docs.example.com/kv8-pinout/", "Full pin table"),
+        ]
+        mock_fetch.return_value = """
+        <html><body>
+          <h1>KV8 Pinout</h1>
+          <table>
+            <tr><th>Pin</th><th>Name</th></tr>
+            <tr><td>A1</td><td>B+</td></tr>
+          </table>
+        </body></html>
+        """
+        result = auto_search_component_data("Emtron KV8 ECU")
+        self.assertEqual(result["error"], "")
+        self.assertGreater(result["pages_crawled"], 0)
+        self.assertIn("A1", result["extracted_text"])
+        self.assertIn("Emtron KV8 ECU", result["extracted_text"])
+
+    @patch("core.ai_intake._fetch_page_html")
+    @patch("core.ai_intake._search_ddg")
+    def test_filters_out_blocked_domains(
+        self, mock_ddg: MagicMock, mock_fetch: MagicMock
+    ) -> None:
+        """Results from YouTube, Amazon, etc. should be skipped."""
+        mock_ddg.return_value = [
+            ("KV8 Review", "https://www.youtube.com/watch?v=abc", "Video review"),
+            ("KV8 Buy Now", "https://amazon.com/dp/B001234", "Buy online"),
+        ]
+        result = auto_search_component_data("Emtron KV8")
+        # All results were blocked, so no pages to crawl.
+        self.assertTrue(result["error"])
+        mock_fetch.assert_not_called()
+
+    @patch("core.ai_intake._fetch_page_html")
+    @patch("core.ai_intake._search_ddg")
+    def test_reports_search_queries_and_urls(
+        self, mock_ddg: MagicMock, mock_fetch: MagicMock
+    ) -> None:
+        mock_ddg.return_value = [
+            ("Pin Table", "https://docs.example.com/pins/", "Connector specs"),
+        ]
+        mock_fetch.return_value = "<html><body><p>Some page with connector data for documentation purposes.</p></body></html>"
+        result = auto_search_component_data("Test Sensor")
+        self.assertGreater(len(result["search_queries"]), 0)
+        self.assertIn("Test Sensor", result["search_queries"][0])
+        self.assertIn("https://docs.example.com/pins/", result["result_urls"])
 
 
 if __name__ == "__main__":

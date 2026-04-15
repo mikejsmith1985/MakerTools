@@ -454,6 +454,74 @@ async function fetchAndParseFromUrl() {
   fetchButton.textContent = "🌐 Fetch & Parse";
 }
 
+/**
+ * Experimental: search the web for component pin data by name alone.
+ * Uses DuckDuckGo to find datasheets/pinouts, crawls results, then AI-parses.
+ */
+async function autoSearchComponent() {
+  const componentName = document.getElementById("lib-name").value.trim();
+  const searchButton = document.getElementById("btn-auto-search");
+
+  if (!componentName) {
+    setStatus("Enter a component name first (the more specific the better).", true);
+    return;
+  }
+
+  searchButton.disabled = true;
+  searchButton.innerHTML = '<span class="spinner-inline"></span> Searching...';
+  setStatus(`Searching the web for "${componentName}" — this may take 15-30 seconds...`);
+
+  try {
+    const result = await eel.ai_auto_search_component(componentName)();
+    if (result.error) {
+      setStatus(`Auto-search: ${result.error}`, true);
+      searchButton.disabled = false;
+      searchButton.textContent = "🔍 Auto-Search";
+      return;
+    }
+
+    const parsed = result.parsed || {};
+    const searchStats = result.search_stats || {};
+    const pagesCrawled = searchStats.pages_crawled || 0;
+    const pagesWithPins = searchStats.pages_with_pin_data || 0;
+    const queriesRun = searchStats.queries_run || 0;
+
+    if (parsed.pins && parsed.pins.length > 0) {
+      populatePinTable(parsed.pins);
+      setStatus(
+        `🔍 Ran ${queriesRun} search(es), crawled ${pagesCrawled} page(s) ` +
+        `(${pagesWithPins} with pin data). AI extracted ${parsed.pins.length} pin(s). ` +
+        "Review carefully — auto-search results may need corrections."
+      );
+    } else {
+      setStatus(
+        `Searched ${queriesRun} quer(ies), crawled ${pagesCrawled} page(s) but AI found no pins. ` +
+        "Try a more specific name, add a part number, or use the URL field instead.",
+        true
+      );
+    }
+
+    // Auto-fill type and voltage if AI provided them.
+    if (parsed.component_type) {
+      const typeSelect = document.getElementById("lib-type");
+      if (typeSelect) typeSelect.value = parsed.component_type;
+    }
+    if (parsed.voltage_nominal) {
+      const voltageInput = document.getElementById("lib-voltage");
+      if (voltageInput) voltageInput.value = parsed.voltage_nominal;
+    }
+    if (parsed.current_draw_amps) {
+      const currentInput = document.getElementById("lib-current");
+      if (currentInput) currentInput.value = parsed.current_draw_amps;
+    }
+  } catch (searchError) {
+    setStatus(`Auto-search error: ${searchError}`, true);
+  }
+
+  searchButton.disabled = false;
+  searchButton.textContent = "🔍 Auto-Search";
+}
+
 /** Open the pick-from-library modal and set the callback. */
 function openAddFromLibrary(callback) {
   onAddToProjectCallback = callback;
@@ -538,6 +606,9 @@ function initLibraryUI() {
 
   // URL fetch and parse
   document.getElementById("btn-fetch-url")?.addEventListener("click", fetchAndParseFromUrl);
+
+  // Auto-search (experimental)
+  document.getElementById("btn-auto-search")?.addEventListener("click", autoSearchComponent);
 
   // Add pin row
   document.getElementById("btn-add-pin-row")?.addEventListener("click", () => {

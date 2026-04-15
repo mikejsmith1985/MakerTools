@@ -18,7 +18,7 @@ from core.runtime_paths import resolve_runtime_app_dir
 
 AI_API_ENDPOINT = "https://models.inference.ai.azure.com/chat/completions"
 AI_MODEL = "gpt-4o"
-AI_MAX_TOKENS = 8192
+AI_MAX_TOKENS = 16384
 
 # Lower temperature keeps wiring output structured and repeatable.
 AI_TEMPERATURE = 0.2
@@ -187,11 +187,13 @@ REFERENCE_META_PATTERN = re.compile(
 REFERENCE_DISCOVERY_KEYWORDS: Tuple[str, ...] = (
     "schematic", "wiring", "pinout", "manual", "connector",
     "install", "installation", "documentation", "guide", "pdf",
+    "spec", "specifications", "features", "datasheet", "technical",
+    "included", "harness", "sensor", "pin", "ecu", "can", "canbus",
 )
-REFERENCE_HTTP_TIMEOUT_SECONDS = 8
-REFERENCE_MAX_URLS = 4
-REFERENCE_MAX_LINKS_PER_PAGE = 4
-REFERENCE_MAX_DESCRIPTION_CHARS = 220
+REFERENCE_HTTP_TIMEOUT_SECONDS = 12
+REFERENCE_MAX_URLS = 8
+REFERENCE_MAX_LINKS_PER_PAGE = 6
+REFERENCE_MAX_DESCRIPTION_CHARS = 500
 
 # Component types that supply power to the rest of the circuit.
 POWER_SOURCE_TYPES = frozenset({"battery", "power_supply"})
@@ -260,11 +262,42 @@ _AI_SYSTEM_PROMPT = (
     "Signal wires are typically 20-22 AWG; power wires are sized for the load current. "
     "Use wire_gauge_awg 'auto' when the system should calculate gauge from current and run length.\n\n"
 
+    "HARNESS AND KIT DECOMPOSITION (CRITICAL):\n"
+    "A wiring harness, harness kit, or engine harness is NOT a single component — it is a bundle of wires "
+    "that connects MANY individual components. When the user mentions a harness (e.g. 'OHM Racing Engine Harness', "
+    "'mil-spec harness', 'fusebox harness'), do NOT list it as one component. Instead, decompose it into "
+    "EVERY individual component the harness connects:\n"
+    "  - For a typical 4-cylinder engine harness (e.g. 4g63, 4g64, 2JZ-GE, LS1): list each injector individually "
+    "(Injector #1, Injector #2, Injector #3, Injector #4), the cam angle sensor, the crank angle sensor, "
+    "the ignition coil pack or individual coils, the coolant temperature sensor, the intake air temperature sensor, "
+    "the manifold absolute pressure sensor or MAP sensor, the throttle position sensor or drive-by-wire throttle body, "
+    "the alternator, the wideband O2 sensor, the oil pressure sensor, the fuel pump relay, and any other sensors "
+    "the user specifies (flex fuel, fuel pressure, knock sensor, etc.).\n"
+    "  - For a fusebox/relay box harness: list the fuse box, each relay (fuel pump relay, fan relay, headlight relay, etc.), "
+    "the ignition switch input, the alternator charge wire, and all switched and always-on power distribution circuits.\n"
+    "  - A harness is infrastructure — the COMPONENTS it connects are what go in the diagram.\n"
+    "  - Wire each decomposed component with its power supply pin, ground pin, signal pins, and any CAN or data pins.\n\n"
+
+    "COMMON ENGINE KNOWLEDGE:\n"
+    "Use this domain knowledge when the user mentions these engines/platforms:\n"
+    "  4g63 (Mitsubishi Eclipse/Eagle Talon/Evo): 4 high-impedance fuel injectors, CAS (cam angle sensor) or "
+    "individual cam+crank sensors (97-99), coil pack (waste-spark), MAP sensor, IAT sensor, coolant temp sensor, "
+    "TPS or DBW throttle body, alternator, oil pressure switch. The 7-bolt (95-99 2G) uses a 97-99 cam and crank "
+    "trigger pattern. Denso high-impedance injectors are a common upgrade.\n"
+    "  W4A33 transmission: solenoid pack (shift solenoids A/B, TCC solenoid, pressure control solenoid), "
+    "input/output speed sensors, gear select switch, neutral safety switch, ATF temperature sensor.\n"
+    "  Emtron KV8: standalone ECU with 8 injector drivers, 8 ignition outputs, CAN bus, wideband controller input, "
+    "analog and digital inputs for sensors. Can control engine AND transmission when properly configured — "
+    "no separate TCU required if user says so. CAN bus connects to ED10M dash and CAN keypad.\n"
+    "  ED10M dash + 8-button CAN keypad: connects via CAN bus to ECU. Keypad buttons can be mapped to "
+    "functions (launch control, traction control, pit limiter, etc.). Both need +12V power, ground, CAN-H, CAN-L.\n\n"
+
     "RESPECT USER COMPONENT CHOICES:\n"
     "Do NOT add components the user did not request. "
     "If the user says one component handles multiple roles (e.g. 'KV8 handles engine and transmission'), "
-    "do NOT add a separate controller for the handled role. "
-    "If the user says to remove or exclude a component, do NOT include it. "
+    "do NOT add a separate controller for the handled role — do NOT add a TCU or SMART150. "
+    "If the user says to remove or exclude a component (e.g. 'remove knock sensor', 'no ABS', 'remove boost controller'), "
+    "do NOT include it. "
     "Match the user's parts list exactly — only add required infrastructure "
     "(fuses, relays, ground bus, termination resistors) that the user's build implicitly needs.\n\n"
 
@@ -318,7 +351,10 @@ _AI_USER_PROMPT_TEMPLATE = (
     "6. If the user says one component handles multiple roles (e.g. 'KV8 handles engine and transmission'), do NOT add a separate controller for the handled role.\n"
     "7. Pin names MUST be as specific as possible — use actual datasheet pin names/numbers when reference material is available; otherwise use descriptive functional labels (V+, GND, SIG_OUT, CAN_H, CAN_L, COIL+, NO, COM).\n"
     "8. Component IDs in connections MUST exactly match component_id values listed in the components array.\n"
-    "9. List each component's known or expected pins in the 'pins' array so the diagram is self-documenting."
+    "9. List each component's known or expected pins in the 'pins' array so the diagram is self-documenting.\n"
+    "10. NEVER list a wiring harness as a single component — ALWAYS decompose it into individual sensors, injectors, coils, actuators, and other components that the harness connects. A harness is wires, not a device.\n"
+    "11. Each individual injector, ignition coil, and sensor MUST be listed as its own component (e.g. Injector #1, Injector #2, Injector #3, Injector #4 — not just 'Fuel Injectors').\n"
+    "12. Use reference material and domain knowledge to determine realistic current draws, wire gauges, and run lengths — do NOT default everything to the same values."
 )
 
 
@@ -519,6 +555,110 @@ def _extract_reference_description(page_html: str) -> str:
     return cleaned_description[:REFERENCE_MAX_DESCRIPTION_CHARS]
 
 
+# Maximum characters returned from product spec extraction.
+PRODUCT_SPECS_MAX_CHARS = 2000
+
+# Regex patterns for product spec extraction.
+_SPEC_LIST_ITEM_PATTERN = re.compile(r"<li[^>]*>(.*?)</li>", re.IGNORECASE | re.DOTALL)
+_SPEC_HEADING_PATTERN = re.compile(
+    r"<(h[2-4])[^>]*>(.*?)</\1>", re.IGNORECASE | re.DOTALL
+)
+_SPEC_TABLE_ROW_PATTERN = re.compile(r"<tr[^>]*>(.*?)</tr>", re.IGNORECASE | re.DOTALL)
+_SPEC_TABLE_CELL_PATTERN = re.compile(
+    r"<t[dh][^>]*>(.*?)</t[dh]>", re.IGNORECASE | re.DOTALL
+)
+_SPEC_PARAGRAPH_PATTERN = re.compile(r"<p[^>]*>(.*?)</p>", re.IGNORECASE | re.DOTALL)
+_SPEC_DESCRIPTION_BLOCK_PATTERN = re.compile(
+    r"<(?:div|section)[^>]*(?:class|id)\s*=\s*[\"'][^\"']*"
+    r"(?:product.?description|product.?features|specifications|tab.?description|"
+    r"ProductDescription|product__description|product.?details|product.?info|"
+    r"product.?specs|feature.?list)"
+    r"[^\"']*[\"'][^>]*>(.*?)</(?:div|section)>",
+    re.IGNORECASE | re.DOTALL,
+)
+
+# Keywords that signal a heading introduces product-relevant content.
+_SPEC_SECTION_KEYWORDS = frozenset({
+    "included", "features", "specifications", "what's in the box",
+    "whats in the box", "sensors", "pins", "connectors", "wiring",
+    "specs", "technical", "details", "description", "components",
+    "harness", "kit contents", "package contents",
+})
+
+
+def _extract_product_specs(page_html: str) -> str:
+    """Extract product specifications, features, and included components from HTML.
+
+    Scans the page for list items, product description blocks, table rows,
+    headings, and paragraphs that typically carry specification and feature
+    data on e-commerce and product pages.  Uses only regex-based extraction
+    (no external HTML parsing libraries).
+
+    Args:
+        page_html: Raw HTML content of the fetched product page.
+
+    Returns:
+        A cleaned, whitespace-normalised string of extracted product details,
+        limited to roughly PRODUCT_SPECS_MAX_CHARS characters.  Returns an
+        empty string when nothing useful is found.
+    """
+    extracted_fragments: List[str] = []
+
+    # ── 1. Description blocks with product-related class/id names ─────────
+    for block_match in _SPEC_DESCRIPTION_BLOCK_PATTERN.finditer(page_html):
+        block_text = _normalize_reference_text(block_match.group(1))
+        if len(block_text) > 10:
+            extracted_fragments.append(block_text)
+
+    # ── 2. Headings that label spec/feature sections ──────────────────────
+    for heading_match in _SPEC_HEADING_PATTERN.finditer(page_html):
+        heading_text = _normalize_reference_text(heading_match.group(2))
+        heading_text_lower = heading_text.lower()
+        if any(keyword in heading_text_lower for keyword in _SPEC_SECTION_KEYWORDS):
+            extracted_fragments.append(f"[{heading_text}]")
+
+    # ── 3. List items (parts lists, feature bullets) ──────────────────────
+    for list_item_match in _SPEC_LIST_ITEM_PATTERN.finditer(page_html):
+        item_text = _normalize_reference_text(list_item_match.group(1))
+        if 5 < len(item_text) < 300:
+            extracted_fragments.append(f"• {item_text}")
+
+    # ── 4. Table rows (spec tables with pin names, wire gauges, etc.) ─────
+    for row_match in _SPEC_TABLE_ROW_PATTERN.finditer(page_html):
+        cells = _SPEC_TABLE_CELL_PATTERN.findall(row_match.group(1))
+        if cells:
+            cell_texts = [
+                _normalize_reference_text(cell_content)
+                for cell_content in cells
+                if _normalize_reference_text(cell_content)
+            ]
+            if cell_texts:
+                extracted_fragments.append(" | ".join(cell_texts))
+
+    # ── 5. Paragraphs inside the page body ────────────────────────────────
+    for paragraph_match in _SPEC_PARAGRAPH_PATTERN.finditer(page_html):
+        paragraph_text = _normalize_reference_text(paragraph_match.group(1))
+        if 20 < len(paragraph_text) < 500:
+            extracted_fragments.append(paragraph_text)
+
+    if not extracted_fragments:
+        return ""
+
+    # Deduplicate while preserving order.
+    seen_fragments: set = set()
+    unique_fragments: List[str] = []
+    for fragment in extracted_fragments:
+        normalised_key = fragment.strip().lower()
+        if normalised_key not in seen_fragments:
+            seen_fragments.add(normalised_key)
+            unique_fragments.append(fragment)
+
+    combined_text = " ".join(unique_fragments)
+    if len(combined_text) > PRODUCT_SPECS_MAX_CHARS:
+        combined_text = combined_text[:PRODUCT_SPECS_MAX_CHARS].rsplit(" ", 1)[0] + "…"
+    return combined_text
+
+
 def _extract_reference_links(page_html: str, base_url: str) -> List[Tuple[str, str]]:
     """Return likely manual, wiring, or pinout links discovered on a reference page."""
     discovered_links: List[Tuple[str, str]] = []
@@ -572,11 +712,25 @@ def _build_reference_research_context(brief_text: str) -> Tuple[str, List[str]]:
         if page_description:
             context_lines.append(f"  Summary: {page_description}")
 
+        product_specs = _extract_product_specs(page_html)
+        if product_specs:
+            context_lines.append(f"  Product Details: {product_specs}")
+
         for link_label, link_url in _extract_reference_links(page_html, reference_url):
             context_lines.append(f"  Related Doc: {link_label} — {link_url}")
             research_notes.append(
                 f"Possible schematic or pinout document: {link_label} — {link_url}"
             )
+
+            # Multi-hop: fetch linked manuals/datasheets and extract their content
+            linked_html = _fetch_reference_page_html(link_url)
+            if not linked_html:
+                continue
+            linked_title = _extract_reference_title(linked_html) or link_label
+            linked_specs = _extract_product_specs(linked_html)
+            if linked_specs:
+                context_lines.append(f"    Deep Reference ({linked_title}): {linked_specs}")
+                research_notes.append(f"Deep reference extracted: {linked_title}")
 
     # If no pages were fetched successfully, return empty.
     if len(context_lines) == 1:
@@ -780,7 +934,7 @@ def _attempt_ai_draft(
     if research_context:
         enriched_brief = f"{brief_text}\n\n{research_context}"
 
-    user_prompt = _AI_USER_PROMPT_TEMPLATE.format(brief_text=enriched_brief[:3000])
+    user_prompt = _AI_USER_PROMPT_TEMPLATE.format(brief_text=enriched_brief[:12000])
     raw_response = _call_github_models_api(_AI_SYSTEM_PROMPT, user_prompt, api_token)
 
     if not raw_response:

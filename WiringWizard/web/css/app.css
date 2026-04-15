@@ -1172,6 +1172,101 @@ body {
   top: 0;
   z-index: 1;
 }
+
+/* Image file input — styled to match the app */
+.input-file {
+  padding: 6px;
+  font-size: 0.85rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}
+.input-file::file-selector-button {
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  padding: 4px 10px;
+  cursor: pointer;
+  margin-right: 8px;
+}
+.input-file::file-selector-button:hover {
+  background: var(--border);
+}
+
+/* Bulk builder status + results */
+.bulk-status {
+  margin-top: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 0.88rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+.bulk-status.bulk-error {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+.bulk-results {
+  margin-top: 16px;
+}
+.bulk-results h3 {
+  font-size: 1rem;
+  margin-bottom: 8px;
+}
+.bulk-component-card {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.bulk-component-card .component-pin-count {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+.bulk-component-card .component-check {
+  float: right;
+}
+
+/* Update notification banner — fixed at bottom */
+.update-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px;
+  background: linear-gradient(135deg, #1e40af, #3b82f6);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+.update-link {
+  color: #fbbf24;
+  font-weight: 700;
+  text-decoration: underline;
+}
+.update-link:hover {
+  color: #fcd34d;
+}
+.update-dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 4px 8px;
+}
+.update-dismiss:hover {
+  color: #fff;
+}
 .pin-table td {
   padding: 3px 4px;
   border-top: 1px solid var(--color-border);

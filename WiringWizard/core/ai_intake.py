@@ -1938,6 +1938,305 @@ def auto_search_component_data(
         "error": "",
     }
 
+
+# ── Image/Schematic Vision Parsing ───────────────────────────────────────────
+
+# Vision model used for image-based pin extraction
+AI_VISION_MODEL = "gpt-4o"
+
+_IMAGE_PARSE_SYSTEM_PROMPT = (
+    "You are an expert electronics engineer who reads wiring diagrams, pinout "
+    "schematics, datasheet images, and connector drawings.\n\n"
+    "The user provides an image of a component's pinout, wiring diagram, or "
+    "datasheet page.  Extract every pin/terminal visible in the image.\n\n"
+    "Return ONLY a JSON object with these keys:\n"
+    "  name           (string)  - component name if identifiable from the image\n"
+    "  component_type (string)  - one of: ecu, sensor, actuator, relay, fuse_box, "
+    "display, switch, motor, solenoid, light, battery, power_supply, ground_bus, "
+    "ignition_switch, microcontroller, motor_driver, resistor, capacitor, "
+    "termination_resistor, connector, harness, general\n"
+    "  manufacturer   (string)  - manufacturer if identifiable\n"
+    "  part_number    (string)  - part/model number if identifiable\n"
+    "  voltage_nominal (number) - nominal operating voltage (default 12.0)\n"
+    "  current_draw_amps (number) - typical current draw (default 0)\n"
+    "  pins           (array)   - every pin/terminal visible in the image:\n"
+    "      pin_id      (string) - connector or pin number\n"
+    "      name        (string) - function name (e.g. 'B+', 'CAN-H')\n"
+    "      pin_type    (string) - one of: power_input, power_output, ground, "
+    "signal_input, signal_output, can_high, can_low, pwm_output, serial_tx, "
+    "serial_rx, switched_power, general\n"
+    "      description (string) - what this pin does\n"
+    "  notes          (string)  - any additional info visible in the image\n\n"
+    "RULES:\n"
+    "- List EVERY pin visible in the image, even if partially obscured.\n"
+    "- Read any text labels, table headers, and wire markings carefully.\n"
+    "- If a pin's function is unclear, use pin_type 'general'.\n"
+    "- Return valid JSON only.  No markdown, no explanation."
+)
+
+
+def parse_component_from_image(
+    component_name: str,
+    image_base64: str,
+    image_mime_type: str,
+    api_token: str,
+) -> Optional[Dict[str, Any]]:
+    """Use AI vision to extract pin data from a schematic/datasheet image.
+
+    Sends the image to the GitHub Models vision endpoint and parses the
+    response into a structured component record.
+
+    Args:
+        component_name: User-provided component name for context.
+        image_base64: Base64-encoded image data (no data: prefix).
+        image_mime_type: MIME type like 'image/png' or 'image/jpeg'.
+        api_token: GitHub Models API token.
+
+    Returns:
+        Parsed component dict on success, or None on failure.
+    """
+    if not image_base64.strip() or not api_token.strip():
+        return None
+
+    user_content = [
+        {
+            "type": "text",
+            "text": (
+                f"Component name: {component_name.strip()}\n\n"
+                "Extract all pin/terminal data from this image into a structured "
+                "component record with a complete pin list."
+            ),
+        },
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{image_mime_type};base64,{image_base64}",
+            },
+        },
+    ]
+
+    encoded_request_body = json.dumps({
+        "model": AI_VISION_MODEL,
+        "messages": [
+            {"role": "system", "content": _IMAGE_PARSE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        "max_tokens": AI_MAX_TOKENS,
+        "temperature": AI_TEMPERATURE,
+    }).encode("utf-8")
+
+    http_request = urllib.request.Request(
+        AI_API_ENDPOINT,
+        data=encoded_request_body,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_token}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(http_request, timeout=90) as http_response:
+            response_body = json.loads(http_response.read().decode("utf-8"))
+            choices = response_body.get("choices", [])
+            if not choices:
+                return None
+            raw_response = choices[0].get("message", {}).get("content", "")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+        return None
+
+    if not raw_response:
+        return None
+
+    parsed = _extract_json_from_response(raw_response)
+    if not isinstance(parsed, dict):
+        return None
+
+    # Normalize the result with sensible defaults.
+    result = {
+        "name": parsed.get("name", component_name.strip()),
+        "component_type": parsed.get("component_type", "general"),
+        "manufacturer": parsed.get("manufacturer", ""),
+        "part_number": parsed.get("part_number", ""),
+        "voltage_nominal": float(parsed.get("voltage_nominal", 12.0)),
+        "current_draw_amps": float(parsed.get("current_draw_amps", 0.0)),
+        "pins": [],
+        "notes": parsed.get("notes", ""),
+    }
+
+    raw_pins = parsed.get("pins", [])
+    if isinstance(raw_pins, list):
+        for pin_data in raw_pins:
+            if not isinstance(pin_data, dict):
+                continue
+            result["pins"].append({
+                "pin_id": str(pin_data.get("pin_id", "")),
+                "name": str(pin_data.get("name", "")),
+                "pin_type": str(pin_data.get("pin_type", "general")),
+                "description": str(pin_data.get("description", "")),
+            })
+
+    return result
+
+
+# ── Bulk Library Builder ─────────────────────────────────────────────────────
+
+# Max distinct components the bulk builder will identify per crawl
+BULK_BUILDER_MAX_COMPONENTS = 20
+
+_BULK_IDENTIFY_SYSTEM_PROMPT = (
+    "You are an expert electronics engineer reading a documentation site.  "
+    "The user provides crawled text from multiple pages of a product's "
+    "documentation or manual.\n\n"
+    "Your job: identify every DISTINCT electrical component mentioned in the "
+    "text that has pin/terminal information.  Each component should be a "
+    "separate product (ECU, sensor, relay, etc.), NOT a pin or a wire.\n\n"
+    "Return ONLY a JSON object with:\n"
+    "  components (array) - each component has:\n"
+    "    name           (string) - specific product name\n"
+    "    component_type (string) - ecu, sensor, actuator, relay, fuse_box, "
+    "display, switch, motor, solenoid, light, battery, power_supply, "
+    "ground_bus, ignition_switch, microcontroller, connector, harness, general\n"
+    "    manufacturer   (string) - manufacturer if identifiable\n"
+    "    part_number    (string) - part/model number if identifiable\n"
+    "    voltage_nominal (number) - nominal voltage\n"
+    "    current_draw_amps (number) - typical current draw\n"
+    "    pins           (array)  - every pin/terminal for this component:\n"
+    "        pin_id      (string)\n"
+    "        name        (string)\n"
+    "        pin_type    (string) - power_input, power_output, ground, "
+    "signal_input, signal_output, can_high, can_low, pwm_output, serial_tx, "
+    "serial_rx, switched_power, general\n"
+    "        description (string)\n"
+    "    notes          (string) - technical notes for this component\n\n"
+    "RULES:\n"
+    "- Identify SEPARATE components — do not merge different products.\n"
+    "- List ALL pins for each component from the provided text.\n"
+    "- If a component appears in multiple sections, combine all its pins.\n"
+    f"- Maximum {BULK_BUILDER_MAX_COMPONENTS} components.\n"
+    "- Return valid JSON only.  No markdown, no explanation."
+)
+
+_BULK_IDENTIFY_USER_TEMPLATE = (
+    "Documentation source: {source_description}\n\n"
+    "Crawled text from the documentation:\n"
+    "---\n"
+    "{crawled_text}\n"
+    "---\n\n"
+    "Identify every distinct component with pin data and return structured records."
+)
+
+
+def bulk_identify_components(
+    documentation_url: str,
+    api_token: str,
+) -> Dict[str, Any]:
+    """Crawl a documentation URL and identify multiple components in bulk.
+
+    Deep-crawls the URL and its sub-pages, then uses AI to identify distinct
+    components and extract pin data for each one.
+
+    Args:
+        documentation_url: Root URL of the documentation site.
+        api_token: GitHub Models API token.
+
+    Returns:
+        Dict with 'components' (list of parsed component dicts), 'crawl_stats',
+        and 'error' (empty string on success).
+    """
+    if not documentation_url.strip() or not api_token.strip():
+        return {"components": [], "crawl_stats": {}, "error": "URL and API token are required."}
+
+    # Reuse the deep-crawl infrastructure with expanded limits for bulk discovery.
+    crawl_result = fetch_url_for_component_data(documentation_url, "bulk-scan")
+    if crawl_result.get("error"):
+        return {"components": [], "crawl_stats": {}, "error": crawl_result["error"]}
+
+    extracted_text = crawl_result.get("extracted_text", "")
+    if not extracted_text.strip():
+        return {
+            "components": [],
+            "crawl_stats": {
+                "pages_crawled": crawl_result.get("pages_crawled", 0),
+                "pages_with_pin_data": crawl_result.get("pages_with_pin_data", 0),
+            },
+            "error": "No meaningful text found at that URL.",
+        }
+
+    user_prompt = _BULK_IDENTIFY_USER_TEMPLATE.format(
+        source_description=documentation_url.strip(),
+        crawled_text=extracted_text.strip()[:24000],
+    )
+
+    raw_response = _call_github_models_api(
+        _BULK_IDENTIFY_SYSTEM_PROMPT, user_prompt, api_token
+    )
+    if not raw_response:
+        return {
+            "components": [],
+            "crawl_stats": {
+                "pages_crawled": crawl_result.get("pages_crawled", 0),
+                "pages_with_pin_data": crawl_result.get("pages_with_pin_data", 0),
+            },
+            "error": "AI could not process the crawled documentation.",
+        }
+
+    parsed = _extract_json_from_response(raw_response)
+    if not isinstance(parsed, dict):
+        return {
+            "components": [],
+            "crawl_stats": {
+                "pages_crawled": crawl_result.get("pages_crawled", 0),
+                "pages_with_pin_data": crawl_result.get("pages_with_pin_data", 0),
+            },
+            "error": "AI returned invalid response format.",
+        }
+
+    raw_components = parsed.get("components", [])
+    if not isinstance(raw_components, list):
+        raw_components = []
+
+    # Normalize each identified component.
+    normalized_components = []
+    for raw_comp in raw_components[:BULK_BUILDER_MAX_COMPONENTS]:
+        if not isinstance(raw_comp, dict):
+            continue
+
+        component = {
+            "name": raw_comp.get("name", "Unknown Component"),
+            "component_type": raw_comp.get("component_type", "general"),
+            "manufacturer": raw_comp.get("manufacturer", ""),
+            "part_number": raw_comp.get("part_number", ""),
+            "voltage_nominal": float(raw_comp.get("voltage_nominal", 12.0)),
+            "current_draw_amps": float(raw_comp.get("current_draw_amps", 0.0)),
+            "pins": [],
+            "notes": raw_comp.get("notes", ""),
+            "source_urls": [documentation_url.strip()],
+        }
+
+        raw_pins = raw_comp.get("pins", [])
+        if isinstance(raw_pins, list):
+            for pin_data in raw_pins:
+                if not isinstance(pin_data, dict):
+                    continue
+                component["pins"].append({
+                    "pin_id": str(pin_data.get("pin_id", "")),
+                    "name": str(pin_data.get("name", "")),
+                    "pin_type": str(pin_data.get("pin_type", "general")),
+                    "description": str(pin_data.get("description", "")),
+                })
+
+        normalized_components.append(component)
+
+    return {
+        "components": normalized_components,
+        "crawl_stats": {
+            "pages_crawled": crawl_result.get("pages_crawled", 0),
+            "pages_with_pin_data": crawl_result.get("pages_with_pin_data", 0),
+        },
+        "error": "",
+    }
+
 _COMPONENT_PARSE_SYSTEM_PROMPT = (
     "You are an expert electronics engineer who reads datasheets, manuals, and "
     "spec sheets.  The user gives you raw text about an electrical component "

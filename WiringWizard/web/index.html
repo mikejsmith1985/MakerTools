@@ -558,6 +558,7 @@
             <option value="">All Types</option>
           </select>
           <button class="btn-primary" id="btn-library-add-new">＋ Add New</button>
+          <button class="btn-accent btn-experimental" id="btn-bulk-build" title="Crawl a docs URL to create multiple components at once">📦 Bulk Build</button>
         </div>
         <div class="library-grid" id="library-grid">
           <div class="tree-empty">Loading library...</div>
@@ -650,6 +651,16 @@
             </div>
             <p class="form-hint">Searches the web for the component name above, crawls top results for pin data. Works best with specific part numbers.</p>
           </div>
+
+          <div class="url-fetch-row">
+            <label for="lib-image-upload">Or upload a schematic/datasheet image <span class="experimental-badge">Vision AI</span></label>
+            <div class="url-input-group">
+              <input type="file" id="lib-image-upload" class="input-field input-file"
+                accept="image/png,image/jpeg,image/gif,image/webp" />
+              <button class="btn-accent btn-experimental" id="btn-parse-image">📷 Parse Image</button>
+            </div>
+            <p class="form-hint">Upload a PNG/JPG of a pinout diagram, connector schematic, or datasheet page. AI vision will extract pin data.</p>
+          </div>
         </div>
 
         <!-- Pin table -->
@@ -728,6 +739,39 @@
         <button class="btn-primary" id="btn-ai-wire-generate">⚡ Generate Connections</button>
       </div>
     </div>
+  </div>
+
+  <!-- ── Bulk Library Builder Modal ──────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-bulk-build" hidden>
+    <div class="modal-panel modal-wide">
+      <div class="modal-header">
+        <h2>📦 Bulk Library Builder <span class="experimental-badge">Experimental</span></h2>
+        <button class="modal-close" data-close-modal="modal-bulk-build">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Paste a documentation URL and AI will crawl it, identify distinct components, and create library entries for each one.</p>
+        <label for="bulk-build-url">Documentation URL</label>
+        <input type="url" id="bulk-build-url" class="input-field"
+          placeholder="https://docs.emtronaustralia.com.au/engine-management/" />
+        <div id="bulk-build-status" class="bulk-status" hidden></div>
+        <div id="bulk-build-results" class="bulk-results" hidden>
+          <h3>Discovered Components</h3>
+          <div id="bulk-results-grid" class="library-grid"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-bulk-build">Cancel</button>
+        <button class="btn-accent btn-experimental" id="btn-bulk-crawl">🔍 Crawl &amp; Identify</button>
+        <button class="btn-primary" id="btn-bulk-save-all" hidden>💾 Save All to Library</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Update Notification Banner ──────────────────────────────────────── -->
+  <div class="update-banner" id="update-banner" hidden>
+    <span id="update-message">A new version is available!</span>
+    <a id="update-link" href="#" target="_blank" class="update-link">Download</a>
+    <button id="update-dismiss" class="update-dismiss" title="Dismiss">✕</button>
   </div>
 
   <!-- ── Scripts ────────────────────────────────────────────────────────── -->

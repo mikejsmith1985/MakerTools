@@ -18,10 +18,26 @@ if exist "%SCRIPT_DIR%WiringWizard.exe" (
 )
 
 REM -- Fall back through Python interpreters in priority order --
-REM pythonw - GUI mode, no console window (best UX)
+REM python - Eel web UI needs a standard interpreter for its websocket server
+where python >nul 2>&1
+if !errorlevel! equ 0 (
+    echo  Starting WiringWizard - web UI via python...
+    start "" python "%SCRIPT_DIR%WiringWizard.py"
+    exit /b 0
+)
+
+REM py - Python launcher for Windows
+where py >nul 2>&1
+if !errorlevel! equ 0 (
+    echo  Starting WiringWizard - web UI via py launcher...
+    start "" py "%SCRIPT_DIR%WiringWizard.py"
+    exit /b 0
+)
+
+REM pythonw - GUI mode fallback
 where pythonw >nul 2>&1
 if !errorlevel! equ 0 (
-    echo  Starting WiringWizard - GUI mode via pythonw...
+    echo  Starting WiringWizard - via pythonw...
     start "" pythonw "%SCRIPT_DIR%WiringWizard.py"
     exit /b 0
 )
@@ -29,24 +45,8 @@ if !errorlevel! equ 0 (
 REM pyw - Python launcher for Windows, windowless mode
 where pyw >nul 2>&1
 if !errorlevel! equ 0 (
-    echo  Starting WiringWizard - GUI mode via pyw...
+    echo  Starting WiringWizard - via pyw...
     start "" pyw "%SCRIPT_DIR%WiringWizard.py"
-    exit /b 0
-)
-
-REM python - standard interpreter (console window visible)
-where python >nul 2>&1
-if !errorlevel! equ 0 (
-    echo  Starting WiringWizard - via python...
-    start "" python "%SCRIPT_DIR%WiringWizard.py"
-    exit /b 0
-)
-
-REM py - Python launcher for Windows, console mode fallback
-where py >nul 2>&1
-if !errorlevel! equ 0 (
-    echo  Starting WiringWizard - via py launcher...
-    start "" py "%SCRIPT_DIR%WiringWizard.py"
     exit /b 0
 )
 

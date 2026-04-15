@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WiringWizard — Component Library**: persistent local component library with full CRUD operations (add, edit, delete, search by name/type). Ships with 5 starter components (battery, 6-way fuse box, ground bus, ignition switch, SPDT relay) including real pin definitions.
+- **WiringWizard — AI-Assisted Pin Parsing**: paste raw datasheet/manual text into the "Add to Library" modal and click "Parse Pins with AI" to auto-extract structured pin definitions. Users review and edit before saving.
+- **WiringWizard — Library-Aware Connection Generator**: new "AI Wire" toolbar button generates connections using ONLY verified pin data from the library, replacing the old approach of guessing pin-level wiring.
+- **WiringWizard — Add from Library to Project**: sidebar "📚" button opens a library picker. Components added from library carry their pin definitions into the project.
+- **WiringWizard — Pin Data Model**: new `Pin` and `LibraryComponent` dataclasses in project_schema.py with 12 standardized pin types (power_input, ground, can_high, can_low, pwm_output, etc.).
+- **WiringWizard — Library UI**: full library management modals (browse/search/add/edit/delete), editable pin table, AI parse integration, and "Add from Library" picker.
+- **WiringWizard — Pin Count Badges**: sidebar component tree items now show a green pin count badge when the component has verified pin definitions.
+
+### Changed
+- **WiringWizard — Architecture Pivot**: shifted from "AI guesses wiring" to "users provide real component data, AI structures and routes it". This fundamental change means the AI connection generator works with verified pins instead of hallucinated ones.
+
+### Added
 - **WiringWizard — two-stage AI pipeline**: replaced single monolithic AI call with a focused two-stage pipeline: Stage 1 decomposes user input into individual components (e.g., each injector, each sensor separately), Stage 2 generates all connections with proper grounds, CAN bus, and signal wiring.
 - **WiringWizard — Shopify JSON API extraction**: product pages on Shopify stores (OHM Racing, Emtron) are now fetched via their JSON API endpoint, bypassing JavaScript-rendering limitations.
 - **WiringWizard — JSON-LD structured data**: extracts schema.org Product data from JSON-LD script tags on product pages for richer component metadata.

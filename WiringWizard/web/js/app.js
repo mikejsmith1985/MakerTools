@@ -10,6 +10,10 @@ import {
   initCanvasInteraction, WIRE_COLOR_MAP
 } from './diagram.js';
 
+import {
+  initLibraryUI, openAddFromLibrary, openAiWireModal, openEditModal as openLibraryEditModal
+} from './library.js';
+
 // ── Application State ──────────────────────────────────────────────────────
 const appState = {
   projectProfile: null,    // {project_name, domain, voltage_class, description}
@@ -33,6 +37,7 @@ async function initializeApp() {
   bindInspectorEvents();
   bindZoomControls();
   initCanvasInteraction();
+  initLibraryUI();
 
   // Populate domain dropdown in the New Project modal
   await populateDomainDropdowns();
@@ -88,9 +93,13 @@ function bindToolbarButtons() {
   getElement('btn-save').addEventListener('click', saveDraft);
   getElement('btn-load').addEventListener('click', loadDraft);
   getElement('btn-generate').addEventListener('click', generateReport);
+  getElement('btn-ai-wire').addEventListener('click', () => openAiWireModal(appState.components));
   getElement('btn-remap').addEventListener('click', () => openModal('modal-remap'));
   getElement('btn-settings').addEventListener('click', () => openModal('modal-settings'));
   getElement('btn-empty-ai').addEventListener('click', openAiAssistModal);
+
+  // AI Wire Generate button inside the modal
+  document.getElementById('btn-ai-wire-generate')?.addEventListener('click', runAiWireGeneration);
 }
 
 function bindZoomControls() {
@@ -112,6 +121,9 @@ function bindSidebarNavigation() {
     if (appState.sidebarView === 'components') openAddComponentModal();
     else openAddConnectionModal();
   });
+  getElement('btn-add-from-library').addEventListener('click', () => {
+    openAddFromLibraryModal();
+  });
 }
 
 function switchSidebarView(viewName) {
@@ -131,7 +143,7 @@ function refreshSidebarTree() {
 
   if (appState.sidebarView === 'components') {
     if (appState.components.length === 0) {
-      treeContainer.innerHTML = '<div class="tree-empty">No components yet.<br/>Use <strong>AI Assist</strong> to get started.</div>';
+      treeContainer.innerHTML = '<div class="tree-empty">No components yet.<br/>Use <strong>📚 Library</strong> to add components with verified pins.</div>';
       return;
     }
     for (const comp of appState.components) {
@@ -150,6 +162,8 @@ function refreshSidebarTree() {
 
 function createComponentTreeItem(component) {
   const typeConfig = getTypeConfig(component.component_type);
+  const pinCount = (component.pins || []).length;
+  const pinBadge = pinCount > 0 ? `<span class="tree-item-pins" title="${pinCount} pins defined">${pinCount}p</span>` : '';
   const itemElement = document.createElement('div');
   itemElement.className = 'tree-item';
   itemElement.dataset.id = component.component_id;
@@ -157,6 +171,7 @@ function createComponentTreeItem(component) {
     <span class="tree-item-icon" style="background:${typeConfig.color}22; color:${typeConfig.color}">${typeConfig.icon}</span>
     <span class="tree-item-label">${escapeHtml(component.component_name || component.component_id)}</span>
     <span class="tree-item-badge">${typeConfig.label}</span>
+    ${pinBadge}
     <span class="tree-item-actions">
       <button title="Edit" data-action="edit" data-id="${component.component_id}">✏</button>
       <button title="Delete" data-action="delete" data-id="${component.component_id}">🗑</button>
@@ -482,6 +497,38 @@ function deleteComponent(componentId) {
   setStatus(`Component "${componentId}" deleted`);
 }
 
+/**
+ * Add a library component to the project. Converts LibraryComponent fields
+ * to project Component format, preserving pin definitions and library_id.
+ */
+function addLibraryComponentToProject(libraryComponent) {
+  const componentId = libraryComponent.library_id || libraryComponent.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+
+  if (appState.components.some(c => c.component_id === componentId)) {
+    alert(`"${libraryComponent.name}" is already in the project.`);
+    return;
+  }
+
+  const projectComponent = {
+    component_id: componentId,
+    component_name: libraryComponent.name,
+    component_type: libraryComponent.component_type || 'general',
+    current_draw_amps: libraryComponent.current_draw_amps || 0,
+    position_label: '',
+    pins: libraryComponent.pins || [],
+    library_id: componentId,
+  };
+
+  appState.components.push(projectComponent);
+  refreshFullUI();
+  setStatus(`Added "${libraryComponent.name}" from library (${(libraryComponent.pins || []).length} pins)`);
+}
+
+/** Open the "Add from Library" picker modal. */
+function openAddFromLibraryModal() {
+  openAddFromLibrary(addLibraryComponentToProject);
+}
+
 // ── Connection CRUD ────────────────────────────────────────────────────────
 
 function openAddConnectionModal() {
@@ -727,6 +774,69 @@ function copyReport() {
     document.body.removeChild(textArea);
     setStatus('Report copied to clipboard');
   });
+}
+
+// ── AI Wire Generation ─────────────────────────────────────────────────────
+
+/**
+ * Run the AI connection generator using library-backed component pin data.
+ * Sends component data (with verified pins) and the user's wiring goal to
+ * the backend, then applies the returned connections to the project.
+ */
+async function runAiWireGeneration() {
+  const wiringGoal = document.getElementById('ai-wire-goal')?.value.trim();
+  if (!wiringGoal) {
+    alert('Describe what you want wired.');
+    return;
+  }
+
+  const componentsWithPins = appState.components.filter(c => c.pins && c.pins.length > 0);
+  if (componentsWithPins.length < 2) {
+    alert('Add at least 2 components with pin data from the library.');
+    return;
+  }
+
+  const generateButton = document.getElementById('btn-ai-wire-generate');
+  generateButton.disabled = true;
+  generateButton.innerHTML = '<span class="spinner-inline"></span> Generating...';
+  setStatus('AI is generating connections from verified pin data...');
+
+  try {
+    const result = await eel.ai_generate_connections(componentsWithPins, wiringGoal)();
+
+    if (result.error) {
+      setStatus(`AI Wire failed: ${result.error}`, true);
+      alert(`AI Wire failed: ${result.error}`);
+      return;
+    }
+
+    const newConnections = result.connections || [];
+    if (newConnections.length === 0) {
+      setStatus('AI returned no connections.', true);
+      alert('AI could not generate connections. Try describing the goal differently.');
+      return;
+    }
+
+    // Merge AI connections into the project (avoid duplicates by connection_id)
+    const existingIds = new Set(appState.connections.map(c => c.connection_id));
+    let addedCount = 0;
+    for (const conn of newConnections) {
+      if (!existingIds.has(conn.connection_id)) {
+        appState.connections.push(conn);
+        addedCount++;
+      }
+    }
+
+    document.getElementById('modal-ai-wire')?.setAttribute('hidden', '');
+    refreshFullUI();
+    setStatus(`AI generated ${addedCount} connection(s) from ${componentsWithPins.length} components.`);
+  } catch (wireError) {
+    setStatus(`AI Wire error: ${wireError}`, true);
+    alert(`Error: ${wireError}`);
+  } finally {
+    generateButton.disabled = false;
+    generateButton.textContent = '⚡ Generate Connections';
+  }
 }
 
 // ── Remap (Apply Changes) ─────────────────────────────────────────────────

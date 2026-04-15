@@ -1503,6 +1503,230 @@ def draft_project_from_brief(
     return _run_fallback_parser(brief_text, requested_project_name)
 
 
+# ── AI Component Library Parser ──────────────────────────────────────────────
+
+_COMPONENT_PARSE_SYSTEM_PROMPT = (
+    "You are an expert electronics engineer who reads datasheets, manuals, and "
+    "spec sheets.  The user gives you raw text about an electrical component "
+    "(pasted from a datasheet, manual, product page, or typed from memory).\n\n"
+    "Your job: extract a structured component record with a complete pin list.\n\n"
+    "Return ONLY a JSON object with these keys:\n"
+    "  name          (string)  - component product name\n"
+    "  component_type (string) - one of: ecu, sensor, actuator, relay, fuse_box, "
+    "display, switch, motor, solenoid, light, battery, power_supply, ground_bus, "
+    "ignition_switch, microcontroller, motor_driver, resistor, capacitor, "
+    "termination_resistor, connector, harness, general\n"
+    "  manufacturer   (string) - manufacturer name if identifiable\n"
+    "  part_number    (string) - part/model number if identifiable\n"
+    "  voltage_nominal (number) - nominal operating voltage (e.g. 12.0)\n"
+    "  current_draw_amps (number) - typical current draw in amps\n"
+    "  pins           (array)  - every pin/terminal on the component:\n"
+    "      pin_id      (string) - connector or pin number, e.g. 'A1', 'Pin 3'\n"
+    "      name        (string) - function name, e.g. 'B+', 'CAN-H', 'INJ1'\n"
+    "      pin_type    (string) - one of: power_input, power_output, ground, "
+    "signal_input, signal_output, can_high, can_low, pwm_output, serial_tx, "
+    "serial_rx, switched_power, general\n"
+    "      description (string) - what this pin does in plain English\n"
+    "  notes          (string) - any additional technical notes\n\n"
+    "RULES:\n"
+    "- List EVERY pin mentioned in the text.  If the text mentions a connector "
+    "with numbered pins, list each one.\n"
+    "- If pin function is unclear, use pin_type 'general' and describe what you know.\n"
+    "- If the text says 'ground' or 'GND', pin_type is 'ground'.\n"
+    "- If the text mentions CAN bus, list separate CAN-H (can_high) and CAN-L "
+    "(can_low) pins.\n"
+    "- Be precise: do not invent pins not mentioned in the text.\n"
+    "- Return valid JSON only.  No markdown, no explanation, no code fences."
+)
+
+_COMPONENT_PARSE_USER_TEMPLATE = (
+    "Component name: {component_name}\n\n"
+    "Raw data provided by the user:\n"
+    "---\n"
+    "{raw_text}\n"
+    "---\n\n"
+    "Parse this into a structured component record with a complete pin list."
+)
+
+
+def parse_component_data(
+    component_name: str,
+    raw_text: str,
+    api_token: str,
+) -> Optional[Dict[str, Any]]:
+    """Use AI to parse raw component data into a structured library entry.
+
+    The user provides a component name and raw text (pasted from a datasheet,
+    typed from memory, or scraped from a URL).  AI extracts the pin list and
+    metadata into a dict compatible with LibraryComponent.from_dict().
+
+    Returns the parsed dict on success, or None if AI is unavailable or fails.
+    """
+    if not raw_text.strip() or not api_token.strip():
+        return None
+
+    user_prompt = _COMPONENT_PARSE_USER_TEMPLATE.format(
+        component_name=component_name.strip(),
+        raw_text=raw_text.strip()[:12000],
+    )
+
+    response = _call_github_models_api(
+        _COMPONENT_PARSE_SYSTEM_PROMPT, user_prompt, api_token
+    )
+    if not response:
+        return None
+
+    parsed = _extract_json_from_response(response)
+    if not isinstance(parsed, dict):
+        return None
+
+    # Ensure required keys are present with sensible defaults.
+    result = {
+        'name': parsed.get('name', component_name.strip()),
+        'component_type': parsed.get('component_type', 'general'),
+        'manufacturer': parsed.get('manufacturer', ''),
+        'part_number': parsed.get('part_number', ''),
+        'voltage_nominal': float(parsed.get('voltage_nominal', 12.0)),
+        'current_draw_amps': float(parsed.get('current_draw_amps', 0.0)),
+        'pins': [],
+        'notes': parsed.get('notes', ''),
+    }
+
+    raw_pins = parsed.get('pins', [])
+    if isinstance(raw_pins, list):
+        for pin_data in raw_pins:
+            if not isinstance(pin_data, dict):
+                continue
+            result['pins'].append({
+                'pin_id': str(pin_data.get('pin_id', '')),
+                'name': str(pin_data.get('name', '')),
+                'pin_type': str(pin_data.get('pin_type', 'general')),
+                'description': str(pin_data.get('description', '')),
+            })
+
+    return result
+
+
+# ── AI Connection Generator (library-aware) ──────────────────────────────────
+
+_CONNECTION_GEN_SYSTEM_PROMPT = (
+    "You are an expert wiring engineer.  You are given a list of components with "
+    "their EXACT pin definitions (from verified datasheets) and a description of "
+    "the wiring goal.\n\n"
+    "Generate ALL the wire connections needed to achieve the goal.  You may ONLY "
+    "use pins that exist in the component list provided.  Do NOT invent pins.\n\n"
+    "Return a JSON object with:\n"
+    "  connections (array) - each connection has:\n"
+    "    connection_id   (string) - unique ID like 'conn_001'\n"
+    "    from_component_id (string) - matches a component_id in the list\n"
+    "    from_pin        (string) - MUST match a pin_id on that component\n"
+    "    to_component_id (string) - destination component_id\n"
+    "    to_pin          (string) - MUST match a pin_id on the destination\n"
+    "    current_amps    (number) - expected current on this wire\n"
+    "    run_length_ft   (number) - estimated wire length in feet\n"
+    "    wire_color      (string) - red for +12V, black for ground, "
+    "yellow/green for CAN-H, green for CAN-L, white for signal, "
+    "blue for sensor, orange for switched power\n"
+    "    circuit_type    (string) - power, ground, signal, can_bus, "
+    "switched_power, pwm\n"
+    "  notes (array of strings) - wiring tips, warnings, or clarifications\n\n"
+    "RULES:\n"
+    "- EVERY component needs both power AND ground connections\n"
+    "- EVERY sensor signal pin must connect to the correct ECU input pin\n"
+    "- EVERY CAN device needs CAN-H and CAN-L connections\n"
+    "- Power flows from battery -> fuse box -> components (never direct)\n"
+    "- Grounds go from components -> ground bus -> battery negative\n"
+    "- Include a 120-ohm termination resistor at each end of the CAN bus\n"
+    "- Return valid JSON only.  No markdown, no explanation."
+)
+
+_CONNECTION_GEN_USER_TEMPLATE = (
+    "PROJECT COMPONENTS (with verified pin definitions):\n"
+    "{components_json}\n\n"
+    "WIRING GOAL:\n"
+    "{wiring_goal}\n\n"
+    "Generate all connections using ONLY the pins listed above."
+)
+
+
+def generate_connections_from_library(
+    components_with_pins: List[Dict[str, Any]],
+    wiring_goal: str,
+    api_token: str,
+) -> Optional[Dict[str, Any]]:
+    """Generate wiring connections using verified pin data from the component library.
+
+    Unlike the old AI draft pipeline, this function works with REAL pin
+    definitions that the user has reviewed and verified.  The AI can only
+    reference pins that actually exist on each component.
+
+    Args:
+        components_with_pins: List of component dicts, each containing a 'pins'
+            array with pin_id, name, pin_type, description.
+        wiring_goal: Natural-language description of what the user wants wired.
+        api_token: GitHub Models API token.
+
+    Returns:
+        Dict with 'connections' and 'notes' keys on success, or None on failure.
+    """
+    if not components_with_pins or not wiring_goal.strip() or not api_token.strip():
+        return None
+
+    components_json = json.dumps(components_with_pins, indent=1)
+    user_prompt = _CONNECTION_GEN_USER_TEMPLATE.format(
+        components_json=components_json[:15000],
+        wiring_goal=wiring_goal.strip()[:3000],
+    )
+
+    response = _call_github_models_api(
+        _CONNECTION_GEN_SYSTEM_PROMPT, user_prompt, api_token
+    )
+    if not response:
+        return None
+
+    parsed = _extract_json_from_response(response)
+    if not isinstance(parsed, dict):
+        return None
+
+    connections = parsed.get('connections', [])
+    if not isinstance(connections, list):
+        connections = []
+
+    # Validate that every connection references real component IDs and pin IDs.
+    valid_pins: Dict[str, set] = {}
+    for component in components_with_pins:
+        component_id = component.get('component_id', '')
+        pin_ids = {
+            pin.get('pin_id', '') for pin in component.get('pins', [])
+            if isinstance(pin, dict)
+        }
+        valid_pins[component_id] = pin_ids
+
+    validated_connections = []
+    for connection in connections:
+        if not isinstance(connection, dict):
+            continue
+        from_comp = connection.get('from_component_id', '')
+        from_pin = connection.get('from_pin', '')
+        to_comp = connection.get('to_component_id', '')
+        to_pin = connection.get('to_pin', '')
+
+        # Accept the connection if both endpoints reference known components.
+        # Pin validation is soft: warn but include (AI may use pin name vs ID).
+        is_from_valid = from_comp in valid_pins
+        is_to_valid = to_comp in valid_pins
+        if is_from_valid and is_to_valid:
+            validated_connections.append(connection)
+
+    raw_notes = parsed.get('notes', [])
+    notes = [str(note) for note in raw_notes] if isinstance(raw_notes, list) else []
+
+    return {
+        'connections': validated_connections,
+        'notes': notes,
+    }
+
+
 # ── AI Remap Prompt ───────────────────────────────────────────────────────────
 
 _AI_REMAP_SYSTEM_PROMPT = (

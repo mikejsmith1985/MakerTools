@@ -286,6 +286,100 @@ def _register_eel_endpoints() -> None:
         saved_token = get_saved_gui_api_token()
         return bool(saved_token)
 
+    # ── Component Library Endpoints ───────────────────────────────────────
+
+    @_eel.expose
+    def get_library() -> Dict[str, Any]:
+        """Return all library components as a list of dicts."""
+        try:
+            from core.component_library import load_library
+            components = load_library()
+            return {"components": [comp.to_dict() for comp in components]}
+        except Exception as library_error:
+            return {"error": str(library_error)}
+
+    @_eel.expose
+    def add_library_component(component_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Add a new component to the library."""
+        try:
+            from core.component_library import add_component
+            from core.project_schema import LibraryComponent
+            new_component = LibraryComponent.from_dict(component_dict)
+            updated_library = add_component(new_component)
+            return {"components": [comp.to_dict() for comp in updated_library]}
+        except Exception as add_error:
+            return {"error": str(add_error)}
+
+    @_eel.expose
+    def update_library_component(component_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an existing library component."""
+        try:
+            from core.component_library import update_component
+            from core.project_schema import LibraryComponent
+            updated = LibraryComponent.from_dict(component_dict)
+            updated_library = update_component(updated)
+            return {"components": [comp.to_dict() for comp in updated_library]}
+        except Exception as update_error:
+            return {"error": str(update_error)}
+
+    @_eel.expose
+    def delete_library_component(library_id: str) -> Dict[str, Any]:
+        """Remove a component from the library by its ID."""
+        try:
+            from core.component_library import delete_component
+            updated_library = delete_component(library_id)
+            return {"components": [comp.to_dict() for comp in updated_library]}
+        except Exception as delete_error:
+            return {"error": str(delete_error)}
+
+    @_eel.expose
+    def search_library_components(
+        query: str = "", component_type: str = ""
+    ) -> Dict[str, Any]:
+        """Search the component library by name/type."""
+        try:
+            from core.component_library import search_library
+            results = search_library(query=query, component_type=component_type)
+            return {"components": [comp.to_dict() for comp in results]}
+        except Exception as search_error:
+            return {"error": str(search_error)}
+
+    @_eel.expose
+    def ai_parse_component(
+        component_name: str, raw_text: str, token_override: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Use AI to parse raw component data into a structured pin list."""
+        try:
+            from core.ai_intake import parse_component_data, resolve_api_token
+            resolved_token = (token_override or "").strip() or get_saved_gui_api_token() or resolve_api_token()
+            if not resolved_token:
+                return {"error": "No API token available. Set one in Settings."}
+            result = parse_component_data(component_name, raw_text, resolved_token)
+            if result is None:
+                return {"error": "AI could not parse the component data. Try providing more detail."}
+            return {"parsed": result}
+        except Exception as parse_error:
+            return {"error": str(parse_error)}
+
+    @_eel.expose
+    def ai_generate_connections(
+        components_json: List[Dict[str, Any]],
+        wiring_goal: str,
+        token_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Use AI to generate connections between library components with real pin data."""
+        try:
+            from core.ai_intake import generate_connections_from_library, resolve_api_token
+            resolved_token = (token_override or "").strip() or get_saved_gui_api_token() or resolve_api_token()
+            if not resolved_token:
+                return {"error": "No API token available. Set one in Settings."}
+            result = generate_connections_from_library(components_json, wiring_goal, resolved_token)
+            if result is None:
+                return {"error": "AI could not generate connections. Try describing the goal differently."}
+            return result
+        except Exception as gen_error:
+            return {"error": str(gen_error)}
+
 
 # ── Application Entry Point ──────────────────────────────────────────────────
 

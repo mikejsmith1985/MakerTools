@@ -386,7 +386,73 @@ async function aiParsePins() {
   parseButton.textContent = "🤖 Parse Pins with AI";
 }
 
-// ── Add from Library to Project ──────────────────────────────────────────
+/** Deep-crawl a documentation URL and AI-parse pin data from it. */
+async function fetchAndParseFromUrl() {
+  const componentName = document.getElementById("lib-name").value.trim();
+  const componentUrl = document.getElementById("lib-fetch-url").value.trim();
+  const fetchButton = document.getElementById("btn-fetch-url");
+
+  if (!componentName) {
+    setStatus("Enter a component name first.", true);
+    return;
+  }
+  if (!componentUrl) {
+    setStatus("Enter a documentation URL to fetch.", true);
+    return;
+  }
+
+  fetchButton.disabled = true;
+  fetchButton.innerHTML = '<span class="spinner-inline"></span> Crawling...';
+  setStatus("Fetching and crawling documentation pages — this may take a moment...");
+
+  try {
+    const result = await eel.ai_fetch_and_parse_component(componentName, componentUrl)();
+    if (result.error) {
+      setStatus(`URL fetch failed: ${result.error}`, true);
+      fetchButton.disabled = false;
+      fetchButton.textContent = "🌐 Fetch & Parse";
+      return;
+    }
+
+    const parsed = result.parsed || {};
+    const crawlStats = result.crawl_stats || {};
+    const pagesCrawled = crawlStats.pages_crawled || 0;
+    const pagesWithPins = crawlStats.pages_with_pin_data || 0;
+
+    if (parsed.pins && parsed.pins.length > 0) {
+      populatePinTable(parsed.pins);
+      setStatus(
+        `Crawled ${pagesCrawled} page(s) (${pagesWithPins} with pin data). ` +
+        `AI extracted ${parsed.pins.length} pin(s). Review and edit before saving.`
+      );
+    } else {
+      setStatus(
+        `Crawled ${pagesCrawled} page(s) but AI found no pins. ` +
+        "Try a more specific URL or paste data manually.",
+        true
+      );
+    }
+
+    // Auto-fill type and voltage if AI provided them.
+    if (parsed.component_type) {
+      const typeSelect = document.getElementById("lib-type");
+      if (typeSelect) typeSelect.value = parsed.component_type;
+    }
+    if (parsed.voltage_nominal) {
+      const voltageInput = document.getElementById("lib-voltage");
+      if (voltageInput) voltageInput.value = parsed.voltage_nominal;
+    }
+    if (parsed.current_draw_amps) {
+      const currentInput = document.getElementById("lib-current");
+      if (currentInput) currentInput.value = parsed.current_draw_amps;
+    }
+  } catch (fetchError) {
+    setStatus(`URL fetch error: ${fetchError}`, true);
+  }
+
+  fetchButton.disabled = false;
+  fetchButton.textContent = "🌐 Fetch & Parse";
+}
 
 /** Open the pick-from-library modal and set the callback. */
 function openAddFromLibrary(callback) {
@@ -469,6 +535,9 @@ function initLibraryUI() {
 
   // AI parse pins
   document.getElementById("btn-ai-parse-pins")?.addEventListener("click", aiParsePins);
+
+  // URL fetch and parse
+  document.getElementById("btn-fetch-url")?.addEventListener("click", fetchAndParseFromUrl);
 
   // Add pin row
   document.getElementById("btn-add-pin-row")?.addEventListener("click", () => {

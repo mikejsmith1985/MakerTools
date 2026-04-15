@@ -10,6 +10,7 @@ it, giving the AI connection generator verified data to work with.
 
 import json
 import os
+import sys
 from datetime import date
 from typing import Dict, List, Optional
 
@@ -28,7 +29,16 @@ def _library_file_path() -> str:
 
 
 def _defaults_file_path() -> str:
-    """Return the absolute path to the shipped default components JSON file."""
+    """Return the absolute path to the shipped default components JSON file.
+
+    In frozen (PyInstaller) builds, the defaults ship inside the bundle
+    extracted to sys._MEIPASS.  In source mode, they live in the local
+    data/ directory alongside this module's parent.
+    """
+    is_frozen = bool(getattr(sys, "frozen", False))
+    if is_frozen:
+        bundle_dir = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        return os.path.join(bundle_dir, "data", _DEFAULTS_FILENAME)
     return os.path.join(get_data_dir(), _DEFAULTS_FILENAME)
 
 

@@ -962,6 +962,38 @@ body {
 .btn-accent:hover { background: linear-gradient(135deg, #7c3aed, #5b21b6); }
 .btn-accent:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* URL fetch input row — side-by-side URL field and button */
+.url-fetch-row {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.url-fetch-row > label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+}
+.url-input-group {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.url-input-group .input-field {
+  flex: 1;
+  min-width: 0;
+}
+.url-input-group .btn-accent {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.form-hint {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 4px;
+  margin-bottom: 0;
+}
+
 /* Library toolbar — search bar and filter row */
 .library-toolbar {
   display: flex;

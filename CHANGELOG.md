@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WiringWizard — automotive component recognition**: AI intake now detects 18 named automotive products (Emtron KV8, ED10M dash, 8-button CAN keypad, SMART150 TCU, W4A33 transmission, OHM Racing harnesses, wideband LSU 4.9, flex fuel sensor, AEM fuel pressure, GM IAT/MAP, cam/crank, Denso injectors, drive-by-wire throttle) and preserves their real names as component labels instead of generic fallback types.
+- **WiringWizard — URL reference research**: when the user's project brief contains product URLs, the intake module fetches page titles, meta descriptions, and discovers links to schematics, wiring diagrams, pinout documents, and installation guides. Research context is injected into the AI prompt and user-facing notes are appended to the draft.
+- **WiringWizard — interactive diagram with clickable cards and circuit tracing**: component cards can be clicked to show detail panels; clicking a wire traces the full circuit end-to-end across all connected modules with glow highlighting.
+- **WiringWizard — diagram rendering polish**: color-based dimming (replaces stipple), tk.Frame overlay panels, repositioned horizontal legend, wider column spacing.
+
+### Changed
+- **WiringWizard — complete UX redesign**: replaced all JSON text editors with visual Treeview tables and modal form dialogs. Components and connections are now managed via Add/Edit/Delete toolbars with dropdowns, spinboxes, and editable combo boxes — virtually no typing required. AI-first "Describe Your Project" tab is the default landing surface. Copy-to-clipboard on the plan output tab. Persistent project bar (name, domain, voltage) always visible. Legacy draft format backward-compatible on load.
+
+### Added
 - **WiringWizard — modernized desktop UI refresh**: Intake, Output, and Re-map surfaces were redesigned with a card-based layout, clearer hierarchy, polished theming, and a persistent status bar so the workflow is more intuitive and engaging.
 - **WiringWizard — frozen-runtime data path support**: runtime paths now resolve from the executable directory in packaged builds so draft and AI token settings persist correctly when running `WiringWizard.exe`.
 - **WiringWizard — standalone executable distribution**: `release.ps1` now builds a `WiringWizard-<version>.exe` via PyInstaller and uploads it as a dedicated release asset alongside the existing zip archives. Users can download and run WiringWizard without installing Python.

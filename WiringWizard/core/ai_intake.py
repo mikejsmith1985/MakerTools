@@ -3,11 +3,13 @@ AI-assisted intake module for WiringWizard — converts a free-text project brie
 structured component/connection draft suitable for populating the WiringWizard UI.
 """
 
+import html
 import json
 import os
 import re
 import urllib.error
 import urllib.request
+from urllib.parse import urljoin
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.runtime_paths import resolve_runtime_app_dir
@@ -145,6 +147,52 @@ COMPONENT_KEYWORD_MAP: List[Tuple[str, str, float]] = [
     (r"\b(motor\s*driver|h.bridge|drv8825|a4988|l298)\b", "motor_driver", 1.5),
 ]
 
+# ── Named Automotive / Aftermarket Component Hints ───────────────────────────
+# Each entry: (regex_pattern, human_name, component_type, default_current_amps)
+# These run before the generic keyword map so named products get preserved.
+NAMED_COMPONENT_HINTS: List[Tuple[str, str, str, float]] = [
+    (r"\bemtron\s+kv8\b", "Emtron KV8 ECU", "ecu", 8.0),
+    (r'\b(ed10m|10\s*"?\s*dash|digital\s+dash)\b', "Emtron ED10M Dash", "display", 0.8),
+    (r"\b(8\s*button\s*can(\s*keypad)?|can\s+keypad|keypad)\b", "8-Button CAN Keypad", "switch", 0.1),
+    (r"\bsmart150\b", "SMART150 TCU", "ecu", 5.0),
+    (r"\b(tcu|transmission\s*control\s*unit)\b", "Transmission Control Unit", "ecu", 5.0),
+    (r"\b(w4a33|automatic\s+transmission)\b", "W4A33 Transmission Solenoids", "solenoid", 3.0),
+    (r"\b(evo\s*x\s+sportmatic\s+shifter|sportmatic\s+shifter|shifter)\b", "Sportmatic Shifter", "switch", 0.1),
+    (r"\b(ohm\s+racing.*fuse|stage\s*3.*fuse\s*box|aftermarket\s+small\s+fusebox|fuse-?box)\b", "OHM Racing Fuse Box", "fuse", 0.0),
+    (r"\b(ohm\s+racing.*engine\s+harness|mil-?spec\s+harness|engine\s+harness)\b", "OHM Racing Engine Harness", "relay", 0.5),
+    (r"\b(lsu\s*4\.?9|wideband)\b", "Wideband LSU 4.9 Sensor", "sensor", 0.1),
+    (r"\b(flexfuel|flex\s*fuel)\b", "Flex Fuel Sensor", "sensor", 0.1),
+    (r"\b(aem\s+fuel\s+pressure|fuel\s+pressure)\b", "AEM Fuel Pressure Sensor", "sensor", 0.05),
+    (r"\b(gm\s+iat|iat)\b", "GM IAT Sensor", "sensor", 0.02),
+    (r"\b(gm\s+map|deutsch\s+map|map\s+sensor)\b", "GM MAP Sensor", "sensor", 0.02),
+    (r"\b(coolant\s+temp|coolant\s+temperature)\b", "Coolant Temperature Sensor", "sensor", 0.02),
+    (r"\b(cam|crank)\b", "Cam and Crank Sensors", "sensor", 0.02),
+    (r"\b(denso\s+injectors|injectors?)\b", "Fuel Injectors", "solenoid", 8.0),
+    (r"\b(dbw|drive\s*by\s*wire|bosch\s+dbw|mitsu\/bosh\s+dbw)\b", "Drive-By-Wire Throttle", "motor", 5.0),
+]
+
+# ── Reference URL Research ───────────────────────────────────────────────────
+# When the user pastes product URLs, WiringWizard fetches page titles and
+# discovers links to wiring manuals, pinouts, and schematics automatically.
+REFERENCE_URL_PATTERN = re.compile(r"https?://[^\s)>\]]+", re.IGNORECASE)
+REFERENCE_LINK_PATTERN = re.compile(
+    r"<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>(.*?)</a>",
+    re.IGNORECASE | re.DOTALL,
+)
+REFERENCE_TITLE_PATTERN = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+REFERENCE_META_PATTERN = re.compile(
+    r"<meta[^>]+name=[\"']description[\"'][^>]+content=[\"']([^\"']+)[\"'][^>]*>",
+    re.IGNORECASE | re.DOTALL,
+)
+REFERENCE_DISCOVERY_KEYWORDS: Tuple[str, ...] = (
+    "schematic", "wiring", "pinout", "manual", "connector",
+    "install", "installation", "documentation", "guide", "pdf",
+)
+REFERENCE_HTTP_TIMEOUT_SECONDS = 8
+REFERENCE_MAX_URLS = 4
+REFERENCE_MAX_LINKS_PER_PAGE = 4
+REFERENCE_MAX_DESCRIPTION_CHARS = 220
+
 # Component types that supply power to the rest of the circuit.
 POWER_SOURCE_TYPES = frozenset({"battery", "power_supply"})
 
@@ -157,8 +205,10 @@ POWER_LOAD_TYPES = frozenset({
 # ── AI Prompt Templates ───────────────────────────────────────────────────────
 
 _AI_SYSTEM_PROMPT = (
-    "You are an expert electronics and wiring engineer assistant for low-voltage maker projects. "
+    "You are an expert electronics and automotive wiring engineer assistant for low-voltage projects. "
     "Given a free-text project brief, you produce a structured wiring project draft as JSON. "
+    "Preserve the user's named products and modules as component_name values whenever possible. "
+    "If reference material is supplied, use it to identify modules, dashboards, keypads, harnesses, manuals, and pinouts. "
     "Your output MUST be a single valid JSON object and nothing else — no markdown fences, no prose. "
     "Use conservative current values and realistic wire lengths for small maker projects. "
     "Component IDs must be simple snake_case identifiers (e.g. battery1, arduino1). "
@@ -319,6 +369,149 @@ def _slugify_to_component_id(label_text: str) -> str:
     return slug.strip("_") or "component"
 
 
+def _generate_component_id(label_text: str, existing_component_ids: List[str]) -> str:
+    """Create a unique component ID that always ends with a numeric suffix."""
+    base_component_id = _slugify_to_component_id(label_text)
+    next_suffix = 1
+    while f"{base_component_id}{next_suffix}" in existing_component_ids:
+        next_suffix += 1
+    return f"{base_component_id}{next_suffix}"
+
+
+def _append_component(
+    discovered_components: List[Dict[str, Any]],
+    component_name: str,
+    component_type: str,
+    default_current_amps: float,
+) -> None:
+    """Append a component while keeping IDs unique and preserving human-readable names."""
+    existing_component_ids = [comp["component_id"] for comp in discovered_components]
+    discovered_components.append({
+        "component_id": _generate_component_id(component_name, existing_component_ids),
+        "component_name": component_name,
+        "component_type": component_type,
+        "current_draw_amps": default_current_amps,
+        "position_label": "TBD",
+    })
+
+
+# ── Reference URL Research Helpers ────────────────────────────────────────────
+
+def _extract_reference_urls(brief_text: str) -> List[str]:
+    """Return unique URLs from the brief in the order the user supplied them."""
+    discovered_urls: List[str] = []
+    for matched_url in REFERENCE_URL_PATTERN.findall(brief_text):
+        cleaned_url = matched_url.rstrip(".,);]")
+        if cleaned_url not in discovered_urls:
+            discovered_urls.append(cleaned_url)
+    return discovered_urls[:REFERENCE_MAX_URLS]
+
+
+def _fetch_reference_page_html(reference_url: str) -> Optional[str]:
+    """Download a reference page so WiringWizard can mine titles and doc links."""
+    http_request = urllib.request.Request(
+        reference_url,
+        headers={"User-Agent": "WiringWizard/1.0"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(http_request, timeout=REFERENCE_HTTP_TIMEOUT_SECONDS) as response:
+            response_bytes = response.read()
+        return response_bytes.decode("utf-8", errors="ignore")
+    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+        return None
+
+
+def _normalize_reference_text(raw_text: str) -> str:
+    """Collapse HTML fragments into a short human-readable sentence."""
+    stripped_text = re.sub(r"<[^>]+>", " ", raw_text)
+    normalized_text = html.unescape(stripped_text)
+    normalized_text = re.sub(r"\s+", " ", normalized_text).strip()
+    return normalized_text
+
+
+def _extract_reference_title(page_html: str) -> str:
+    """Return the page title from fetched HTML, or an empty string when absent."""
+    matched_title = REFERENCE_TITLE_PATTERN.search(page_html)
+    if not matched_title:
+        return ""
+    return _normalize_reference_text(matched_title.group(1))
+
+
+def _extract_reference_description(page_html: str) -> str:
+    """Return the meta description from fetched HTML, or an empty string when absent."""
+    matched_description = REFERENCE_META_PATTERN.search(page_html)
+    if not matched_description:
+        return ""
+    cleaned_description = _normalize_reference_text(matched_description.group(1))
+    return cleaned_description[:REFERENCE_MAX_DESCRIPTION_CHARS]
+
+
+def _extract_reference_links(page_html: str, base_url: str) -> List[Tuple[str, str]]:
+    """Return likely manual, wiring, or pinout links discovered on a reference page."""
+    discovered_links: List[Tuple[str, str]] = []
+    for relative_url, anchor_html in REFERENCE_LINK_PATTERN.findall(page_html):
+        anchor_text = _normalize_reference_text(anchor_html)
+        searchable_text = f"{anchor_text} {relative_url}".lower()
+        if not any(keyword in searchable_text for keyword in REFERENCE_DISCOVERY_KEYWORDS):
+            continue
+        absolute_url = urljoin(base_url, relative_url)
+        reference_link = (anchor_text or "Reference Link", absolute_url)
+        if reference_link not in discovered_links:
+            discovered_links.append(reference_link)
+        if len(discovered_links) >= REFERENCE_MAX_LINKS_PER_PAGE:
+            break
+    return discovered_links
+
+
+def _build_reference_research_context(brief_text: str) -> Tuple[str, List[str]]:
+    """
+    Turn URLs found in the brief into compact research context and user-facing notes.
+
+    Fetches each URL, extracts page title / meta description, and discovers links
+    to manuals, schematics, and pinout documents.  The research context string is
+    appended to the AI prompt; the notes list is shown to the user in the draft.
+
+    Args:
+        brief_text: The user's free-text project brief (may contain URLs).
+
+    Returns:
+        Tuple of (research_context_string, list_of_user_facing_notes).
+        Both are empty when no URLs are found or all fetches fail.
+    """
+    reference_urls = _extract_reference_urls(brief_text)
+    if not reference_urls:
+        return "", []
+
+    context_lines = ["Reference Material:"]
+    research_notes: List[str] = []
+
+    for reference_url in reference_urls:
+        page_html = _fetch_reference_page_html(reference_url)
+        if not page_html:
+            continue
+
+        page_title = _extract_reference_title(page_html) or reference_url
+        page_description = _extract_reference_description(page_html)
+        context_lines.append(f"- {page_title}")
+        context_lines.append(f"  Source: {reference_url}")
+        research_notes.append(f"Reference found: {page_title}")
+
+        if page_description:
+            context_lines.append(f"  Summary: {page_description}")
+
+        for link_label, link_url in _extract_reference_links(page_html, reference_url):
+            context_lines.append(f"  Related Doc: {link_label} — {link_url}")
+            research_notes.append(
+                f"Possible schematic or pinout document: {link_label} — {link_url}"
+            )
+
+    # If no pages were fetched successfully, return empty.
+    if len(context_lines) == 1:
+        return "", []
+    return "\n".join(context_lines), research_notes
+
+
 def _infer_components_from_brief(brief_text: str) -> List[Dict[str, Any]]:
     """
     Scan the brief for low-voltage component keywords and build a component list.
@@ -339,22 +532,31 @@ def _infer_components_from_brief(brief_text: str) -> List[Dict[str, Any]]:
     discovered_components: List[Dict[str, Any]] = []
     seen_component_types: set = set()
 
+    # Named product hints run first so user-specified names are preserved.
+    for keyword_pattern, component_name, component_type, default_current_amps in NAMED_COMPONENT_HINTS:
+        if not re.search(keyword_pattern, lowered_brief, re.IGNORECASE):
+            continue
+        _append_component(
+            discovered_components,
+            component_name=component_name,
+            component_type=component_type,
+            default_current_amps=default_current_amps,
+        )
+        seen_component_types.add(component_type)
+
+    # Generic keyword map fills remaining types not already matched above.
     for keyword_pattern, component_type, default_current_amps in COMPONENT_KEYWORD_MAP:
         if not re.search(keyword_pattern, lowered_brief, re.IGNORECASE):
             continue
-        # One component per type in fallback mode keeps the output manageable.
         if component_type in seen_component_types:
             continue
         seen_component_types.add(component_type)
-
-        component_id = f"{_slugify_to_component_id(component_type)}1"
-        discovered_components.append({
-            "component_id": component_id,
-            "component_name": component_type.replace("_", " ").title(),
-            "component_type": component_type,
-            "current_draw_amps": default_current_amps,
-            "position_label": "TBD",
-        })
+        _append_component(
+            discovered_components,
+            component_name=component_type.replace("_", " ").title(),
+            component_type=component_type,
+            default_current_amps=default_current_amps,
+        )
 
     has_power_source = any(
         comp["component_type"] in POWER_SOURCE_TYPES
@@ -367,21 +569,21 @@ def _infer_components_from_brief(brief_text: str) -> List[Dict[str, Any]]:
 
     # Guarantee at least one power source and one load so connections can be built.
     if not has_power_source:
+        existing_ids = [comp["component_id"] for comp in discovered_components]
         discovered_components.insert(0, {
-            "component_id": "power_supply1",
+            "component_id": _generate_component_id("Power Supply", existing_ids),
             "component_name": "Power Supply",
             "component_type": "power_supply",
             "current_draw_amps": 5.0,
             "position_label": "TBD",
         })
     if not has_load:
-        discovered_components.append({
-            "component_id": "microcontroller1",
-            "component_name": "Microcontroller",
-            "component_type": "microcontroller",
-            "current_draw_amps": 0.5,
-            "position_label": "TBD",
-        })
+        _append_component(
+            discovered_components,
+            component_name="Microcontroller",
+            component_type="microcontroller",
+            default_current_amps=0.5,
+        )
 
     return discovered_components
 
@@ -446,6 +648,14 @@ def _run_fallback_parser(brief_text: str, requested_project_name: str) -> Dict[s
         Structured draft payload dict with used_ai set to False.
     """
     inferred_components = _infer_components_from_brief(brief_text)
+
+    # Enrich with reference research from any URLs the user supplied.
+    research_context, research_notes = _build_reference_research_context(brief_text)
+    if research_context:
+        # Re-run inference with enriched text so URL-discovered terms get matched.
+        enriched_brief = f"{brief_text}\n\n{research_context}"
+        inferred_components = _infer_components_from_brief(enriched_brief)
+
     starter_connections = _build_fallback_connections(inferred_components)
 
     resolved_project_name = (
@@ -465,7 +675,7 @@ def _run_fallback_parser(brief_text: str, requested_project_name: str) -> Dict[s
             "Review all component types, current ratings, and positions before wiring.",
             "Add ground return connections as needed for each load.",
             "Verify pinouts and polarity for every component before connecting.",
-        ],
+        ] + research_notes,
         "used_ai": False,
     }
 
@@ -492,7 +702,13 @@ def _attempt_ai_draft(
     Returns:
         Payload dict with used_ai=True, or None on any failure.
     """
-    user_prompt = _AI_USER_PROMPT_TEMPLATE.format(brief_text=brief_text[:3000])
+    # Enrich the brief with any reference material from supplied URLs.
+    research_context, _ = _build_reference_research_context(brief_text)
+    enriched_brief = brief_text
+    if research_context:
+        enriched_brief = f"{brief_text}\n\n{research_context}"
+
+    user_prompt = _AI_USER_PROMPT_TEMPLATE.format(brief_text=enriched_brief[:3000])
     raw_response = _call_github_models_api(_AI_SYSTEM_PROMPT, user_prompt, api_token)
 
     if not raw_response:

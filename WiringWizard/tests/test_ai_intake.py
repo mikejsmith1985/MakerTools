@@ -16,6 +16,7 @@ if ROOT_DIR not in sys.path:
 
 from core.ai_intake import (
     _attempt_ai_draft,
+    _build_reference_research_context,
     _build_fallback_connections,
     _extract_json_from_response,
     _infer_components_from_brief,
@@ -164,6 +165,49 @@ class TestInferComponentsFromBrief(unittest.TestCase):
         for component in components:
             self.assertGreaterEqual(component["current_draw_amps"], 0.0)
 
+    def test_detects_named_automotive_components_from_detailed_brief(self) -> None:
+        detailed_brief = (
+            "I need to wire my 4g63 engine and W4A33 transmission to an Emtron KV8, "
+            'an ED10M 10" dash, an 8 button CAN keypad, and a SMART150 TCU. '
+            "The plan also needs wideband LSU 4.9, GM flex fuel, and AEM fuel pressure."
+        )
+        component_names = {
+            component["component_name"] for component in _infer_components_from_brief(detailed_brief)
+        }
+        self.assertIn("Emtron KV8 ECU", component_names)
+        self.assertIn("Emtron ED10M Dash", component_names)
+        self.assertIn("8-Button CAN Keypad", component_names)
+        self.assertIn("SMART150 TCU", component_names)
+        self.assertIn("Wideband LSU 4.9 Sensor", component_names)
+        self.assertIn("Flex Fuel Sensor", component_names)
+        self.assertIn("AEM Fuel Pressure Sensor", component_names)
+
+
+class TestReferenceResearchContext(unittest.TestCase):
+    """Verify that product URLs are turned into useful research context for the app."""
+
+    def test_collects_page_titles_and_document_links_from_urls(self) -> None:
+        page_html = """
+        <html>
+          <head>
+            <title>Emtron KV8 ECU</title>
+            <meta name="description" content="Standalone motorsport ECU with advanced I/O." />
+          </head>
+          <body>
+            <a href="/docs/kv8-wiring-manual.pdf">Wiring Manual</a>
+            <a href="/support/connector-pinout">Connector Pinout</a>
+          </body>
+        </html>
+        """
+        with patch("core.ai_intake._fetch_reference_page_html", return_value=page_html):
+            research_context, research_notes = _build_reference_research_context(
+                "Use this ECU: https://emtron.world/products/kv8"
+            )
+
+        self.assertIn("Emtron KV8 ECU", research_context)
+        self.assertIn("https://emtron.world/docs/kv8-wiring-manual.pdf", research_context)
+        self.assertTrue(any("Connector Pinout" in note for note in research_notes))
+
 
 # ── Fallback Connection Builder ───────────────────────────────────────────────
 
@@ -257,6 +301,22 @@ class TestRunFallbackParser(unittest.TestCase):
         result = _run_fallback_parser("", "")
         self.assertIsInstance(result["components"], list)
         self.assertGreaterEqual(len(result["components"]), 1)
+
+    def test_appends_reference_research_notes_when_urls_are_provided(self) -> None:
+        with patch(
+            "core.ai_intake._build_reference_research_context",
+            return_value=(
+                "Reference Material:\n- Emtron KV8 ECU\n- Wiring Manual: https://example.com/kv8.pdf",
+                [
+                    "Reference found: Emtron KV8 ECU",
+                    "Possible schematic or pinout document: https://example.com/kv8.pdf",
+                ],
+            ),
+        ):
+            result = _run_fallback_parser("KV8 https://example.com/kv8", "")
+
+        self.assertTrue(any("Reference found: Emtron KV8 ECU" in note for note in result["notes"]))
+        self.assertTrue(any("kv8.pdf" in note for note in result["notes"]))
 
 
 # ── JSON Extraction from AI Response ─────────────────────────────────────────
@@ -490,6 +550,33 @@ class TestAttemptAiDraft(unittest.TestCase):
         with patch("core.ai_intake._call_github_models_api", return_value=None):
             result = _attempt_ai_draft("brief", "", "token")
         self.assertIsNone(result)
+
+    def test_includes_reference_research_context_in_ai_prompt(self) -> None:
+        captured_prompt = {}
+        valid_response = json.dumps({
+            "project_name": "Research Project",
+            "description": "Desc",
+            "components": [],
+            "connections": [],
+            "notes": [],
+        })
+
+        def capture_prompt(_system_prompt: str, user_prompt: str, _api_token: str) -> str:
+            captured_prompt["user_prompt"] = user_prompt
+            return valid_response
+
+        with patch(
+            "core.ai_intake._build_reference_research_context",
+            return_value=(
+                "Reference Material:\n- Emtron KV8 ECU\n- Wiring Manual: https://example.com/kv8.pdf",
+                [],
+            ),
+        ):
+            with patch("core.ai_intake._call_github_models_api", side_effect=capture_prompt):
+                _attempt_ai_draft("Use https://example.com/kv8", "", "token")
+
+        self.assertIn("Emtron KV8 ECU", captured_prompt["user_prompt"])
+        self.assertIn("kv8.pdf", captured_prompt["user_prompt"])
 
 
 if __name__ == "__main__":

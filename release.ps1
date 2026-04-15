@@ -179,12 +179,16 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 # --onefile    : single exe
-# --windowed   : no console window (Tkinter GUI app)
+# --windowed   : no console window (Eel opens browser in app mode)
 # --name       : output binary name
+# --add-data   : bundle the web/ folder (HTML/CSS/JS) and Eel's internal JS
 # --distpath   : write exe here
 # --workpath / --specpath : keep build artefacts in staging dir
+$webSourceDir = Join-Path $wiringWizardSource "web"
 & $pythonCommand.Source -m PyInstaller --onefile --windowed `
     --name "WiringWizard" `
+    --add-data "$webSourceDir;web" `
+    --collect-all eel `
     --distpath $exeDistDir `
     --workpath (Join-Path $exeBuildDir "build") `
     --specpath $exeBuildDir `

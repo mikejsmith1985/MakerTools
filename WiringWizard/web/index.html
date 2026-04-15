@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WiringWizard — Wiring Diagram &amp; Harness Planner</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+
+  <!-- ── Top Toolbar ────────────────────────────────────────────────────── -->
+  <header class="toolbar" id="toolbar">
+    <div class="toolbar-left">
+      <span class="toolbar-brand">⚡ WiringWizard</span>
+      <button class="toolbar-btn" id="btn-new-project" title="New Project">
+        <span class="icon">＋</span> New
+      </button>
+      <button class="toolbar-btn" id="btn-save" title="Save Draft">
+        <span class="icon">💾</span> Save
+      </button>
+      <button class="toolbar-btn" id="btn-load" title="Load Draft">
+        <span class="icon">📂</span> Load
+      </button>
+      <div class="toolbar-divider"></div>
+      <button class="toolbar-btn primary" id="btn-ai-assist" title="AI Draft from Brief">
+        <span class="icon">🤖</span> AI Assist
+      </button>
+      <button class="toolbar-btn" id="btn-generate" title="Generate Wiring Plan">
+        <span class="icon">📋</span> Generate Plan
+      </button>
+      <button class="toolbar-btn" id="btn-remap" title="Apply Changes">
+        <span class="icon">🔄</span> Re-map
+      </button>
+    </div>
+    <div class="toolbar-center">
+      <span class="toolbar-project-name" id="project-name-display">No Project</span>
+    </div>
+    <div class="toolbar-right">
+      <div class="toolbar-zoom">
+        <button class="toolbar-btn-sm" id="btn-zoom-out" title="Zoom Out">−</button>
+        <span class="zoom-level" id="zoom-level">100%</span>
+        <button class="toolbar-btn-sm" id="btn-zoom-in" title="Zoom In">+</button>
+        <button class="toolbar-btn-sm" id="btn-zoom-fit" title="Fit to View">⊞</button>
+      </div>
+      <div class="toolbar-divider"></div>
+      <button class="toolbar-btn-sm" id="btn-settings" title="Settings">⚙</button>
+    </div>
+  </header>
+
+  <!-- ── Main Content Area ──────────────────────────────────────────────── -->
+  <div class="main-content">
+
+    <!-- Left Sidebar: Component Tree -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-nav">
+          <button class="sidebar-nav-btn active" id="nav-components" title="Components">
+            <span class="nav-icon">🔌</span>
+            <span class="nav-label">Components</span>
+          </button>
+          <button class="sidebar-nav-btn" id="nav-connections" title="Connections">
+            <span class="nav-icon">🔗</span>
+            <span class="nav-label">Wiring</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-header">
+        <span class="sidebar-title" id="sidebar-title">Components</span>
+        <button class="sidebar-action-btn" id="btn-add-item" title="Add Component">＋</button>
+      </div>
+
+      <div class="sidebar-tree" id="sidebar-tree">
+        <div class="tree-empty">No components yet.<br/>Use <strong>AI Assist</strong> to get started.</div>
+      </div>
+
+      <!-- Wire Legend -->
+      <div class="sidebar-legend" id="wire-legend">
+        <div class="legend-title">Wire Colors</div>
+        <div class="legend-items" id="legend-items"></div>
+      </div>
+    </aside>
+
+    <!-- Center: SVG Diagram Canvas -->
+    <main class="canvas-area" id="canvas-area">
+      <div class="canvas-container" id="canvas-container">
+        <svg id="diagram-svg" xmlns="http://www.w3.org/2000/svg" width="100%" height="100%">
+          <defs>
+            <!-- Drop shadow for component cards -->
+            <filter id="card-shadow" x="-10%" y="-10%" width="130%" height="140%">
+              <feDropShadow dx="0" dy="2" stdDeviation="4" flood-color="#000" flood-opacity="0.5" />
+            </filter>
+            <!-- Glow for selected wires -->
+            <filter id="wire-glow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            <!-- Arrowhead marker for directed wires -->
+            <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#7d8590" />
+            </marker>
+          </defs>
+          <!-- All content scales/pans together -->
+          <g id="zoom-group">
+            <g id="grid-layer"></g>
+            <g id="wires-layer"></g>
+            <g id="components-layer"></g>
+            <g id="labels-layer"></g>
+          </g>
+        </svg>
+        <!-- Empty state overlay -->
+        <div class="canvas-empty" id="canvas-empty">
+          <div class="empty-icon">⚡</div>
+          <h3>Welcome to WiringWizard</h3>
+          <p>Describe your project with <strong>AI Assist</strong> or add components manually to build your wiring diagram.</p>
+          <button class="btn-primary" id="btn-empty-ai">🤖 Start with AI Assist</button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Right Panel: Contextual Inspector -->
+    <aside class="inspector" id="inspector">
+      <div class="inspector-header">
+        <span class="inspector-title">Inspector</span>
+        <button class="inspector-close" id="btn-close-inspector" title="Close">✕</button>
+      </div>
+      <div class="inspector-body" id="inspector-body">
+        <div class="inspector-empty">
+          Click a component or wire in the diagram to inspect it.
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <!-- ── Status Bar ─────────────────────────────────────────────────────── -->
+  <footer class="statusbar" id="statusbar">
+    <span class="status-text" id="status-text">Ready</span>
+    <span class="status-right">
+      <span class="status-badge" id="status-domain"></span>
+      <span class="status-badge" id="status-voltage"></span>
+      <span class="status-count" id="status-counts"></span>
+    </span>
+  </footer>
+
+  <!-- ══════════════════════════════════════════════════════════════════════
+       MODALS
+       ══════════════════════════════════════════════════════════════════════ -->
+
+  <!-- AI Assist Modal -->
+  <div class="modal-overlay" id="modal-ai" hidden>
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2>🤖 AI Assist — Describe Your Project</h2>
+        <button class="modal-close" data-close-modal="modal-ai">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Describe your wiring project in plain English. Include component names, URLs to product pages, and what you want to achieve. The more detail the better.</p>
+        <textarea class="modal-textarea" id="ai-brief-text" rows="10"
+          placeholder="Example: I need to wire up my 4g63 engine to an Emtron KV8 ECU with a 10&quot; dash and 8-button CAN keypad. I have OHM Racing mil-spec harnesses for the engine and fuse box..."></textarea>
+        <div class="modal-row">
+          <div class="form-group">
+            <label for="ai-project-name">Project Name (optional)</label>
+            <input type="text" id="ai-project-name" class="form-input" placeholder="e.g. 2G DSM KV8 Build" />
+          </div>
+        </div>
+        <details class="token-section">
+          <summary>🔑 API Token Settings</summary>
+          <div class="token-body">
+            <div class="form-group">
+              <label for="ai-token-input">GitHub Models API Token</label>
+              <input type="password" id="ai-token-input" class="form-input" placeholder="ghp_..." />
+            </div>
+            <div class="token-actions">
+              <button class="btn-secondary btn-sm" id="btn-save-token">Save Token</button>
+              <button class="btn-danger btn-sm" id="btn-clear-token">Clear Token</button>
+            </div>
+            <p class="token-hint" id="token-status"></p>
+          </div>
+        </details>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-ai">Cancel</button>
+        <button class="btn-primary" id="btn-run-ai-draft">⚡ Generate Draft</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- New Project Modal -->
+  <div class="modal-overlay" id="modal-new-project" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>New Project</h2>
+        <button class="modal-close" data-close-modal="modal-new-project">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="np-name">Project Name</label>
+          <input type="text" id="np-name" class="form-input" placeholder="My Wiring Project" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="np-domain">Domain</label>
+            <select id="np-domain" class="form-select"></select>
+          </div>
+          <div class="form-group">
+            <label for="np-voltage">Voltage Class</label>
+            <select id="np-voltage" class="form-select"></select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="np-description">Description</label>
+          <textarea id="np-description" class="form-textarea" rows="3" placeholder="Brief description..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-new-project">Cancel</button>
+        <button class="btn-primary" id="btn-create-project">Create Project</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit Component Modal -->
+  <div class="modal-overlay" id="modal-component" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-component-title">Add Component</h2>
+        <button class="modal-close" data-close-modal="modal-component">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="comp-id">Component ID</label>
+            <input type="text" id="comp-id" class="form-input" placeholder="ecu1" />
+          </div>
+          <div class="form-group">
+            <label for="comp-name">Name</label>
+            <input type="text" id="comp-name" class="form-input" placeholder="Emtron KV8 ECU" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="comp-type">Type</label>
+            <select id="comp-type" class="form-select">
+              <option value="battery">Battery</option>
+              <option value="power_supply">Power Supply</option>
+              <option value="ecu">ECU</option>
+              <option value="microcontroller">Microcontroller</option>
+              <option value="relay">Relay</option>
+              <option value="fuse">Fuse</option>
+              <option value="led_load">LED Load</option>
+              <option value="light">Light</option>
+              <option value="motor">Motor</option>
+              <option value="servo">Servo</option>
+              <option value="fan">Fan</option>
+              <option value="pump">Pump</option>
+              <option value="sensor">Sensor</option>
+              <option value="switch">Switch</option>
+              <option value="display">Display</option>
+              <option value="buzzer">Buzzer</option>
+              <option value="solenoid">Solenoid</option>
+              <option value="stepper">Stepper Motor</option>
+              <option value="motor_driver">Motor Driver</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="comp-current">Current Draw (A)</label>
+            <input type="number" id="comp-current" class="form-input" step="0.1" min="0" value="0" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="comp-position">Position / Location</label>
+          <input type="text" id="comp-position" class="form-input" placeholder="Engine bay, firewall, etc." />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-component">Cancel</button>
+        <button class="btn-primary" id="btn-save-component">Save Component</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add/Edit Connection Modal -->
+  <div class="modal-overlay" id="modal-connection" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="modal-connection-title">Add Connection</h2>
+        <button class="modal-close" data-close-modal="modal-connection">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-row">
+          <div class="form-group">
+            <label for="conn-id">Connection ID</label>
+            <input type="text" id="conn-id" class="form-input" placeholder="conn_001" />
+          </div>
+          <div class="form-group">
+            <label for="conn-color">Wire Color</label>
+            <select id="conn-color" class="form-select">
+              <option value="red">Red (Power)</option>
+              <option value="black">Black (Ground)</option>
+              <option value="blue">Blue</option>
+              <option value="green">Green</option>
+              <option value="yellow">Yellow</option>
+              <option value="orange">Orange</option>
+              <option value="white">White</option>
+              <option value="purple">Purple</option>
+              <option value="brown">Brown</option>
+              <option value="pink">Pink</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="conn-from">From Component</label>
+            <select id="conn-from" class="form-select"></select>
+          </div>
+          <div class="form-group">
+            <label for="conn-from-pin">From Pin</label>
+            <input type="text" id="conn-from-pin" class="form-input" placeholder="+12V" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="conn-to">To Component</label>
+            <select id="conn-to" class="form-select"></select>
+          </div>
+          <div class="form-group">
+            <label for="conn-to-pin">To Pin</label>
+            <input type="text" id="conn-to-pin" class="form-input" placeholder="BATT+" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="conn-current">Current (A)</label>
+            <input type="number" id="conn-current" class="form-input" step="0.1" min="0" value="0" />
+          </div>
+          <div class="form-group">
+            <label for="conn-length">Run Length (ft)</label>
+            <input type="number" id="conn-length" class="form-input" step="0.5" min="0" value="3" />
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-connection">Cancel</button>
+        <button class="btn-primary" id="btn-save-connection">Save Connection</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Report Viewer Modal -->
+  <div class="modal-overlay" id="modal-report" hidden>
+    <div class="modal modal-xl">
+      <div class="modal-header">
+        <h2>📋 Generated Wiring Plan</h2>
+        <button class="modal-close" data-close-modal="modal-report">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="report-toolbar">
+          <button class="btn-secondary btn-sm" id="btn-copy-report">📋 Copy to Clipboard</button>
+        </div>
+        <pre class="report-output" id="report-output"></pre>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-report">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Re-map Modal -->
+  <div class="modal-overlay" id="modal-remap" hidden>
+    <div class="modal modal-lg">
+      <div class="modal-header">
+        <h2>🔄 Re-map / Apply Changes</h2>
+        <button class="modal-close" data-close-modal="modal-remap">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Enter change requests as a JSON array. Supported operations: add_component, update_component, remove_component, add_connection, update_connection, remove_connection.</p>
+        <textarea class="modal-textarea" id="remap-json" rows="12" placeholder='[
+  {
+    "operation": "update_connection",
+    "payload": {
+      "connection_id": "conn_001",
+      "run_length_ft": 11.5
+    }
+  }
+]'></textarea>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-remap">Cancel</button>
+        <button class="btn-primary" id="btn-apply-remap">Apply Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="modal-settings" hidden>
+    <div class="modal">
+      <div class="modal-header">
+        <h2>⚙ Settings</h2>
+        <button class="modal-close" data-close-modal="modal-settings">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="settings-token">GitHub Models API Token</label>
+          <input type="password" id="settings-token" class="form-input" placeholder="ghp_..." />
+        </div>
+        <div class="form-row">
+          <button class="btn-secondary btn-sm" id="btn-settings-save-token">Save Token</button>
+          <button class="btn-danger btn-sm" id="btn-settings-clear-token">Clear Token</button>
+        </div>
+        <p class="token-hint" id="settings-token-status"></p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-primary" data-close-modal="modal-settings">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Scripts ────────────────────────────────────────────────────────── -->
+  <script type="text/javascript" src="/eel.js"></script>
+  <script type="module" src="js/diagram.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

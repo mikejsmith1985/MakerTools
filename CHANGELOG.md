@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **WiringWizard — web-based UI rewrite**: replaced the Tkinter desktop interface with a modern Eel-powered web UI (HTML/CSS/JS + SVG) providing a professional dark-themed experience inspired by AetherLink Wiring Studio.
+  - Interactive SVG wiring diagram with zoom/pan (mouse wheel + drag), click-to-select components, and BFS circuit tracing on wire click
+  - Left sidebar with component tree and connection list (with edit/delete inline actions)
+  - Right contextual inspector showing component details, connection stats, and current draw totals
+  - Seven modal dialogs: AI Assist, New Project, Add/Edit Component, Add/Edit Connection, Report Viewer, Re-map, and Settings
+  - Manhattan-routed wires with colored paths, arrowheads, inline labels, and a dynamic wire color legend
+  - Component cards rendered as typed SVG groups with icons, color-coded borders, pin dots, and current draw badges
+  - Column-based auto-layout: power sources → protection → controllers → loads
+  - Status bar with project domain, voltage class, and component/wire counts
+  - Loading spinner overlay for async operations (AI draft, report generation)
+  - Copy-to-clipboard on generated reports
+  - Token management accessible from both AI Assist modal and Settings
+
+### Changed
+- **WiringWizard — launcher updated for Eel**: `start.bat` now prefers `python` over `pythonw` since Eel needs a standard interpreter for its websocket server
+- **WiringWizard — PyInstaller packaging**: `release.ps1` now bundles the `web/` directory and Eel's internal files via `--add-data` and `--collect-all eel`
+
+### Added
 - **WiringWizard — automotive component recognition**: AI intake now detects 18 named automotive products (Emtron KV8, ED10M dash, 8-button CAN keypad, SMART150 TCU, W4A33 transmission, OHM Racing harnesses, wideband LSU 4.9, flex fuel sensor, AEM fuel pressure, GM IAT/MAP, cam/crank, Denso injectors, drive-by-wire throttle) and preserves their real names as component labels instead of generic fallback types.
 - **WiringWizard — URL reference research**: when the user's project brief contains product URLs, the intake module fetches page titles, meta descriptions, and discovers links to schematics, wiring diagrams, pinout documents, and installation guides. Research context is injected into the AI prompt and user-facing notes are appended to the draft.
 - **WiringWizard — interactive diagram with clickable cards and circuit tracing**: component cards can be clicked to show detail panels; clicking a wire traces the full circuit end-to-end across all connected modules with glow highlighting.

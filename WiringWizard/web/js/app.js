@@ -14,6 +14,14 @@ import {
   initLibraryUI, openAddFromLibrary, openAiWireModal, openEditModal as openLibraryEditModal
 } from './library.js';
 
+// Pin-type color map for inspector display (mirrors PIN_TYPE_COLORS in diagram.js)
+const PIN_TYPE_COLOR_MAP = {
+  power_input: '#e85454', power_output: '#e85454', switched_power: '#db6d28',
+  ground: '#8b8b8b', signal_input: '#3fb950', signal_output: '#3fb950',
+  can_high: '#58a6ff', can_low: '#58a6ff', pwm_output: '#a371f7',
+  serial_tx: '#d29922', serial_rx: '#d29922', general: '#7d8590',
+};
+
 // ── Application State ──────────────────────────────────────────────────────
 const appState = {
   projectProfile: null,    // {project_name, domain, voltage_class, description}
@@ -272,6 +280,24 @@ function showComponentInspector(componentId) {
     c => c.from_component_id === componentId || c.to_component_id === componentId
   );
   const totalCurrent = connectedWires.reduce((sum, c) => sum + (c.current_amps || 0), 0);
+  const pins = component.pins || [];
+
+  // Build pin list HTML if component has library pins
+  let pinSectionHtml = '';
+  if (pins.length > 0) {
+    const pinRows = pins.map(pin => {
+      const pinColor = PIN_TYPE_COLOR_MAP[pin.pin_type] || '#7d8590';
+      return `<div class="insp-row">
+        <span class="insp-label"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pinColor};margin-right:4px;vertical-align:middle"></span>${escapeHtml(pin.pin_id || '')}</span>
+        <span class="insp-value">${escapeHtml(pin.name || '')} <span style="color:#484f58;font-size:10px">${escapeHtml(pin.pin_type || '')}</span></span>
+      </div>`;
+    }).join('');
+    pinSectionHtml = `
+    <div class="insp-section">
+      <div class="insp-section-title">Pins (${pins.length})</div>
+      ${pinRows}
+    </div>`;
+  }
 
   const inspectorBody = getElement('inspector-body');
   getElement('inspector').classList.remove('collapsed');
@@ -284,6 +310,7 @@ function showComponentInspector(componentId) {
       <div class="insp-row"><span class="insp-label">Max Draw</span><span class="insp-value accent">${component.current_draw_amps}A</span></div>
       <div class="insp-row"><span class="insp-label">Location</span><span class="insp-value">${escapeHtml(component.position_label || '—')}</span></div>
     </div>
+    ${pinSectionHtml}
     <div class="insp-section">
       <div class="insp-section-title">Connections (${connectedWires.length})</div>
       ${connectedWires.map(wire => `<div class="insp-row">

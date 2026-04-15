@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **WiringWizard — Pin Data Model**: new `Pin` and `LibraryComponent` dataclasses in project_schema.py with 12 standardized pin types (power_input, ground, can_high, can_low, pwm_output, etc.).
 - **WiringWizard — Library UI**: full library management modals (browse/search/add/edit/delete), editable pin table, AI parse integration, and "Add from Library" picker.
 - **WiringWizard — Pin Count Badges**: sidebar component tree items now show a green pin count badge when the component has verified pin definitions.
+- **WiringWizard — Diagram Pin Rendering**: component cards in the SVG diagram dynamically size based on pin count, show all defined pins color-coded by type (power=red, ground=gray, CAN=blue, signal=green, PWM=purple), and highlight connected pins with filled dots.
+- **WiringWizard — Inspector Pin Details**: selecting a component in the diagram shows its full pin list with color-coded type indicators in the inspector panel.
 
 ### Changed
 - **WiringWizard — Architecture Pivot**: shifted from "AI guesses wiring" to "users provide real component data, AI structures and routes it". This fundamental change means the AI connection generator works with verified pins instead of hallucinated ones.

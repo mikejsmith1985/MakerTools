@@ -38,7 +38,9 @@ const DEFAULT_WIRE_COLOR = '#7d8590';
 
 // Layout constants
 const CARD_WIDTH = 170;
-const CARD_HEIGHT = 80;
+const CARD_HEIGHT_BASE = 80;
+const CARD_HEIGHT_PER_PIN = 14;
+const CARD_HEIGHT_MIN = 80;
 const CARD_PADDING = 14;
 const CARD_HEADER_HEIGHT = 24;
 const PIN_RADIUS = 5;
@@ -47,6 +49,22 @@ const ROW_GAP = 120;
 const GRID_MARGIN_X = 80;
 const GRID_MARGIN_Y = 60;
 const GRID_DOT_SPACING = 30;
+
+// Pin type color mapping for visual differentiation on the diagram
+const PIN_TYPE_COLORS = {
+  power_input:   '#e85454',
+  power_output:  '#e85454',
+  switched_power:'#db6d28',
+  ground:        '#8b8b8b',
+  signal_input:  '#3fb950',
+  signal_output: '#3fb950',
+  can_high:      '#58a6ff',
+  can_low:       '#58a6ff',
+  pwm_output:    '#a371f7',
+  serial_tx:     '#d29922',
+  serial_rx:     '#d29922',
+  general:       '#7d8590',
+};
 
 // Power types placed on the left column
 const POWER_SOURCE_TYPES = new Set(['battery', 'power_supply']);
@@ -270,35 +288,93 @@ function computeLayout() {
 
     let currentRowY = GRID_MARGIN_Y;
     for (const comp of columnComponents) {
+      const cardHeight = computeCardHeight(comp);
       diagramState.componentPositions.set(comp.component_id, {
         x: currentColumnX,
         y: currentRowY,
         width: CARD_WIDTH,
-        height: CARD_HEIGHT,
+        height: cardHeight,
       });
-      currentRowY += CARD_HEIGHT + ROW_GAP;
+      currentRowY += cardHeight + ROW_GAP;
     }
     currentColumnX += CARD_WIDTH + COLUMN_GAP;
   }
 
-  // Compute pin positions for all connections
+  // Compute pin positions for all components (library pins + connection pins)
   computePinPositions();
 }
 
 /**
- * Compute pin positions on component edges based on connections.
- * Pins are distributed along the left/right edges of component cards.
+ * Compute card height to fit all defined pins. Cards with no pins use the
+ * base height; cards with pins grow to accommodate the full pin list.
+ */
+function computeCardHeight(component) {
+  const pinCount = (component.pins || []).length;
+  if (pinCount === 0) return CARD_HEIGHT_MIN;
+  // Base area (header + name + current) is ~60px, then add per-pin rows
+  const pinAreaHeight = pinCount * CARD_HEIGHT_PER_PIN + 8;
+  return Math.max(CARD_HEIGHT_MIN, 60 + pinAreaHeight);
+}
+
+/**
+ * Compute pin positions on component edges.
+ *
+ * Phase 1: If a component has library-defined pins (component.pins[]),
+ * ALL pins are placed in a vertical list on both edges — left for input-type
+ * pins, right for output-type pins.
+ *
+ * Phase 2: For connection-only pins (components without library pin data),
+ * pins are placed dynamically based on connections, as before.
  */
 function computePinPositions() {
-  // Group pins per component per side (left = inbound, right = outbound)
-  const componentPinCounts = new Map(); // componentId → { left: [], right: [] }
+  const LEFT_PIN_TYPES = new Set([
+    'power_input', 'ground', 'signal_input', 'can_low', 'serial_rx', 'general',
+  ]);
+
+  // Phase 1: Library-defined pins
+  for (const comp of diagramState.components) {
+    const pins = comp.pins || [];
+    if (pins.length === 0) continue;
+
+    const pos = diagramState.componentPositions.get(comp.component_id);
+    if (!pos) continue;
+
+    const leftPins = pins.filter(p => LEFT_PIN_TYPES.has(p.pin_type || 'general'));
+    const rightPins = pins.filter(p => !LEFT_PIN_TYPES.has(p.pin_type || 'general'));
+
+    const pinStartY = pos.y + CARD_HEADER_HEIGHT + 18;
+
+    leftPins.forEach((pin, idx) => {
+      const pinKey = `${comp.component_id}:${pin.pin_id || pin.name}`;
+      diagramState.pinPositions.set(pinKey, {
+        x: pos.x,
+        y: pinStartY + idx * CARD_HEIGHT_PER_PIN,
+        pinType: pin.pin_type || 'general',
+        label: pin.name || pin.pin_id,
+        isDefined: true,
+      });
+    });
+
+    rightPins.forEach((pin, idx) => {
+      const pinKey = `${comp.component_id}:${pin.pin_id || pin.name}`;
+      diagramState.pinPositions.set(pinKey, {
+        x: pos.x + pos.width,
+        y: pinStartY + idx * CARD_HEIGHT_PER_PIN,
+        pinType: pin.pin_type || 'general',
+        label: pin.name || pin.pin_id,
+        isDefined: true,
+      });
+    });
+  }
+
+  // Phase 2: Connection-based pins for components WITHOUT library pin data
+  const componentPinCounts = new Map();
 
   for (const conn of diagramState.connections) {
     const fromPos = diagramState.componentPositions.get(conn.from_component_id);
     const toPos = diagramState.componentPositions.get(conn.to_component_id);
     if (!fromPos || !toPos) continue;
 
-    // "from" pin goes on the right side of the source component
     const fromKey = `${conn.from_component_id}:${conn.from_pin}`;
     if (!diagramState.pinPositions.has(fromKey)) {
       if (!componentPinCounts.has(conn.from_component_id)) {
@@ -307,7 +383,6 @@ function computePinPositions() {
       componentPinCounts.get(conn.from_component_id).right.push(fromKey);
     }
 
-    // "to" pin goes on the left side of the target component
     const toKey = `${conn.to_component_id}:${conn.to_pin}`;
     if (!diagramState.pinPositions.has(toKey)) {
       if (!componentPinCounts.has(conn.to_component_id)) {
@@ -317,29 +392,30 @@ function computePinPositions() {
     }
   }
 
-  // Distribute pins evenly along each side
   for (const [componentId, sides] of componentPinCounts) {
     const pos = diagramState.componentPositions.get(componentId);
     if (!pos) continue;
 
-    // Left-side pins (inbound connections arrive here)
     const usableHeight = pos.height - CARD_HEADER_HEIGHT - 10;
     const topOffset = pos.y + CARD_HEADER_HEIGHT + 8;
 
     sides.left.forEach((pinKey, pinIndex) => {
+      if (diagramState.pinPositions.has(pinKey)) return;
       const pinSpacing = usableHeight / (sides.left.length + 1);
       diagramState.pinPositions.set(pinKey, {
         x: pos.x,
         y: topOffset + pinSpacing * (pinIndex + 1),
+        isDefined: false,
       });
     });
 
-    // Right-side pins (outbound connections leave here)
     sides.right.forEach((pinKey, pinIndex) => {
+      if (diagramState.pinPositions.has(pinKey)) return;
       const pinSpacing = usableHeight / (sides.right.length + 1);
       diagramState.pinPositions.set(pinKey, {
         x: pos.x + pos.width,
         y: topOffset + pinSpacing * (pinIndex + 1),
+        isDefined: false,
       });
     });
   }
@@ -430,11 +506,13 @@ function drawComponents() {
 
     // Current draw info
     const currentAmps = comp.current_draw_amps || 0;
+    const pinCount = (comp.pins || []).length;
+    const metaText = pinCount > 0 ? `${currentAmps}A  |  ${pinCount} pins` : `${currentAmps}A`;
     group.appendChild(createSvgElement('text', {
       x: pos.width / 2, y: 58, fill: '#7d8590',
       'font-size': '10', 'text-anchor': 'middle',
       'font-family': 'var(--font-mono)',
-    })).textContent = `${currentAmps}A`;
+    })).textContent = metaText;
 
     // Position label
     if (comp.position_label && comp.position_label !== 'TBD') {
@@ -459,32 +537,47 @@ function drawComponents() {
 }
 
 /**
- * Draw connection pin dots on a component card's edges.
+ * Draw all pin dots and labels on a component card's edges.
+ * Library-defined pins get colored dots by type; connection-only pins are blue.
+ * Connected pins get a brighter fill to indicate an active wire.
  */
 function drawComponentPins(parentGroup, component, position) {
+  // Build a set of connected pin keys for highlighting
+  const connectedPinKeys = new Set();
+  for (const conn of diagramState.connections) {
+    connectedPinKeys.add(`${conn.from_component_id}:${conn.from_pin}`);
+    connectedPinKeys.add(`${conn.to_component_id}:${conn.to_pin}`);
+  }
+
   for (const [pinKey, pinPos] of diagramState.pinPositions) {
     if (!pinKey.startsWith(component.component_id + ':')) continue;
 
     const localX = pinPos.x - position.x;
     const localY = pinPos.y - position.y;
-    const pinLabel = pinKey.split(':')[1];
+    const pinLabel = pinPos.label || pinKey.split(':')[1];
+    const pinTypeColor = PIN_TYPE_COLORS[pinPos.pinType] || '#7d8590';
+    const isConnected = connectedPinKeys.has(pinKey);
+    const isDefined = pinPos.isDefined;
 
-    // Pin connection dot
+    // Pin dot — filled if connected, hollow if not
     parentGroup.appendChild(createSvgElement('circle', {
       class: 'pin-dot',
       cx: localX, cy: localY, r: PIN_RADIUS,
-      fill: '#21262d', stroke: '#58a6ff', 'stroke-width': 1.5,
+      fill: isConnected ? pinTypeColor : '#21262d',
+      stroke: isDefined ? pinTypeColor : '#58a6ff',
+      'stroke-width': isConnected ? 2 : 1.5,
     }));
 
-    // Tiny pin label
+    // Pin label — positioned outside the card edge
     const isLeftSide = localX < position.width / 2;
     parentGroup.appendChild(createSvgElement('text', {
-      x: isLeftSide ? localX - 8 : localX + 8,
+      x: isLeftSide ? localX + 8 : localX - 8,
       y: localY + 3,
-      fill: '#484f58', 'font-size': '8',
-      'text-anchor': isLeftSide ? 'end' : 'start',
+      fill: isDefined ? '#7d8590' : '#484f58',
+      'font-size': '8',
+      'text-anchor': isLeftSide ? 'start' : 'end',
       'font-family': 'var(--font-mono)',
-    })).textContent = truncateText(pinLabel, 12);
+    })).textContent = truncateText(pinLabel, 14);
   }
 }
 

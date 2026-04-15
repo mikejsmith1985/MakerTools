@@ -20,6 +20,7 @@ from core.ai_intake import (
     clear_saved_gui_api_token,
     draft_project_from_brief,
     get_saved_gui_api_token,
+    remap_project_with_ai,
     save_gui_api_token,
 )
 from core.diagram_renderer import render_full_report
@@ -223,6 +224,21 @@ def _register_eel_endpoints() -> None:
             }
         except (json.JSONDecodeError, ValidationError, ValueError) as change_error:
             return {"error": str(change_error)}
+
+    @_eel.expose
+    def ai_remap_project(
+        profile_dict: Dict[str, Any],
+        components_list: List[Dict[str, Any]],
+        connections_list: List[Dict[str, Any]],
+        change_description: str,
+    ) -> Dict[str, Any]:
+        """Use AI to apply natural-language change requests to the current project."""
+        try:
+            return remap_project_with_ai(
+                components_list, connections_list, change_description
+            )
+        except Exception as remap_error:
+            return {"error": str(remap_error)}
 
     @_eel.expose
     def save_draft(draft_data: Dict[str, Any]) -> Dict[str, Any]:

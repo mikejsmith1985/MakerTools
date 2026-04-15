@@ -376,20 +376,137 @@
         <button class="modal-close" data-close-modal="modal-remap">✕</button>
       </div>
       <div class="modal-body">
-        <p class="modal-hint">Enter change requests as a JSON array. Supported operations: add_component, update_component, remove_component, add_connection, update_connection, remove_connection.</p>
-        <textarea class="modal-textarea" id="remap-json" rows="12" placeholder='[
-  {
-    "operation": "update_connection",
-    "payload": {
-      "connection_id": "conn_001",
-      "run_length_ft": 11.5
-    }
-  }
-]'></textarea>
+
+        <!-- Tab selector for change mode -->
+        <div class="remap-tabs">
+          <button class="remap-tab active" data-remap-tab="ai">🤖 Describe Changes</button>
+          <button class="remap-tab" data-remap-tab="quick">⚡ Quick Actions</button>
+        </div>
+
+        <!-- AI natural-language tab -->
+        <div class="remap-panel" id="remap-panel-ai">
+          <p class="modal-hint">Tell the AI what you want to change — in plain English.</p>
+          <textarea class="modal-textarea" id="remap-ai-text" rows="5" placeholder="Examples:
+• Remove the SMART150 and route transmission through the KV8
+• Add a relay for the headlights on a switched ignition circuit
+• Change the wideband sensor ground to chassis ground near the ECU
+• Add CAN bus wiring between the dash and the keypad"></textarea>
+          <button class="btn-primary remap-ai-btn" id="btn-ai-remap">🤖 Apply with AI</button>
+        </div>
+
+        <!-- Quick-action form tab -->
+        <div class="remap-panel" id="remap-panel-quick" hidden>
+          <div class="remap-action-row">
+            <label>Action</label>
+            <select id="remap-action-type" class="form-select">
+              <option value="">— Select —</option>
+              <option value="remove_component">Remove Component</option>
+              <option value="remove_connection">Remove Wire</option>
+              <option value="add_component">Add Component</option>
+              <option value="add_connection">Add Wire</option>
+            </select>
+          </div>
+
+          <!-- Remove component fields -->
+          <div class="remap-fields" id="remap-fields-remove-component" hidden>
+            <label>Component to Remove</label>
+            <select id="remap-remove-comp-select" class="form-select"></select>
+          </div>
+
+          <!-- Remove connection fields -->
+          <div class="remap-fields" id="remap-fields-remove-connection" hidden>
+            <label>Wire to Remove</label>
+            <select id="remap-remove-conn-select" class="form-select"></select>
+          </div>
+
+          <!-- Add component fields -->
+          <div class="remap-fields" id="remap-fields-add-component" hidden>
+            <div class="form-row">
+              <label>Name</label>
+              <input type="text" id="remap-add-comp-name" class="form-input" placeholder="e.g. Headlight Relay" />
+            </div>
+            <div class="form-row">
+              <label>Type</label>
+              <select id="remap-add-comp-type" class="form-select">
+                <option value="relay">Relay</option>
+                <option value="fuse">Fuse</option>
+                <option value="sensor">Sensor</option>
+                <option value="switch">Switch</option>
+                <option value="light">Light</option>
+                <option value="fan">Fan</option>
+                <option value="motor">Motor</option>
+                <option value="ecu">ECU / Controller</option>
+                <option value="display">Display</option>
+                <option value="solenoid">Solenoid</option>
+                <option value="led_load">LED</option>
+                <option value="buzzer">Buzzer</option>
+                <option value="pump">Pump</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Current (A)</label>
+              <input type="number" id="remap-add-comp-amps" class="form-input" value="1" min="0" step="0.1" />
+            </div>
+            <div class="form-row">
+              <label>Location</label>
+              <input type="text" id="remap-add-comp-location" class="form-input" placeholder="e.g. Engine bay, left side" />
+            </div>
+          </div>
+
+          <!-- Add connection fields -->
+          <div class="remap-fields" id="remap-fields-add-connection" hidden>
+            <div class="form-row">
+              <label>From Component</label>
+              <select id="remap-add-conn-from" class="form-select"></select>
+            </div>
+            <div class="form-row">
+              <label>From Pin</label>
+              <input type="text" id="remap-add-conn-from-pin" class="form-input" placeholder="e.g. Pin A1, +12V Out" />
+            </div>
+            <div class="form-row">
+              <label>To Component</label>
+              <select id="remap-add-conn-to" class="form-select"></select>
+            </div>
+            <div class="form-row">
+              <label>To Pin</label>
+              <input type="text" id="remap-add-conn-to-pin" class="form-input" placeholder="e.g. Power In, Pin 3" />
+            </div>
+            <div class="form-row">
+              <label>Circuit Type</label>
+              <select id="remap-add-conn-circuit" class="form-select">
+                <option value="power_ignition">Power — Ignition Switched</option>
+                <option value="power_always_on">Power — Always On</option>
+                <option value="power_accessory">Power — Accessory</option>
+                <option value="ground">Ground</option>
+                <option value="signal_analog">Signal — Analog</option>
+                <option value="signal_digital">Signal — Digital</option>
+                <option value="can_bus">CAN Bus</option>
+                <option value="data">Data / Serial</option>
+              </select>
+            </div>
+            <div class="form-row">
+              <label>Wire Color</label>
+              <select id="remap-add-conn-color" class="form-select">
+                <option value="red">Red (+12V constant)</option>
+                <option value="yellow">Yellow (+12V ignition)</option>
+                <option value="orange">Orange (+12V accessory)</option>
+                <option value="black">Black (Ground)</option>
+                <option value="green">Green (Signal)</option>
+                <option value="blue">Blue (CAN-H)</option>
+                <option value="white">White (CAN-L)</option>
+                <option value="purple">Purple</option>
+                <option value="brown">Brown</option>
+                <option value="gray">Gray</option>
+              </select>
+            </div>
+          </div>
+
+          <button class="btn-primary remap-quick-btn" id="btn-quick-remap" disabled>⚡ Apply Action</button>
+        </div>
+
       </div>
       <div class="modal-footer">
         <button class="btn-secondary" data-close-modal="modal-remap">Cancel</button>
-        <button class="btn-primary" id="btn-apply-remap">Apply Changes</button>
       </div>
     </div>
   </div>

@@ -19,7 +19,7 @@ GITHUB_REPO = "MakerTools"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
 
 # Current app version — updated at release time
-CURRENT_VERSION = "2.2.0"
+CURRENT_VERSION = "2.2.1"
 
 # Regex to extract semver components from a tag like "v2.1.0"
 _VERSION_PATTERN = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")

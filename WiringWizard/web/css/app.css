@@ -1267,6 +1267,61 @@ body {
 .update-dismiss:hover {
   color: #fff;
 }
+
+/* Batch image import progress bar */
+.batch-progress-bar {
+  position: relative;
+  margin-top: 12px;
+  height: 28px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.batch-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #3b82f6, #60a5fa);
+  border-radius: 6px;
+  transition: width 0.4s ease;
+  width: 0;
+}
+.batch-progress-text {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-shadow: 0 0 4px var(--surface);
+}
+
+/* Batch result card status badges */
+.batch-card-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.batch-card-status.success {
+  background: #065f46;
+  color: #a7f3d0;
+}
+.batch-card-status.failed {
+  background: #7f1d1d;
+  color: #fecaca;
+}
+.batch-card-status.pending {
+  background: var(--surface-hover);
+  color: var(--text-secondary);
+}
+.batch-card-filename {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+  word-break: break-all;
+}
 .pin-table td {
   padding: 3px 4px;
   border-top: 1px solid var(--color-border);

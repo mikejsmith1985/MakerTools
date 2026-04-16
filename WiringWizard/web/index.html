@@ -559,6 +559,7 @@
           </select>
           <button class="btn-primary" id="btn-library-add-new">＋ Add New</button>
           <button class="btn-accent btn-experimental" id="btn-bulk-build" title="Crawl a docs URL to create multiple components at once">📦 Bulk Build</button>
+          <button class="btn-accent btn-experimental" id="btn-batch-images" title="Upload multiple schematic images to create components via AI vision">📷 Batch Import</button>
         </div>
         <div class="library-grid" id="library-grid">
           <div class="tree-empty">Loading library...</div>
@@ -763,6 +764,36 @@
         <button class="btn-secondary" data-close-modal="modal-bulk-build">Cancel</button>
         <button class="btn-accent btn-experimental" id="btn-bulk-crawl">🔍 Crawl &amp; Identify</button>
         <button class="btn-primary" id="btn-bulk-save-all" hidden>💾 Save All to Library</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Batch Image Import Modal ────────────────────────────────────────── -->
+  <div class="modal-overlay" id="modal-batch-images" hidden>
+    <div class="modal-panel modal-wide">
+      <div class="modal-header">
+        <h2>📷 Batch Image Import <span class="experimental-badge">Vision AI</span></h2>
+        <button class="modal-close" data-close-modal="modal-batch-images">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-hint">Select multiple schematic images (PNG, JPG, GIF, WebP). Each image will be analyzed by AI vision to extract a component with its pins. Great for forum schematics, scanned datasheets, and pinout diagrams.</p>
+        <label for="batch-image-files">Select schematic images (up to 20)</label>
+        <input type="file" id="batch-image-files" class="input-field input-file"
+          accept="image/png,image/jpeg,image/gif,image/webp" multiple />
+        <div id="batch-image-status" class="bulk-status" hidden></div>
+        <div id="batch-image-progress" class="batch-progress-bar" hidden>
+          <div class="batch-progress-fill" id="batch-progress-fill"></div>
+          <span class="batch-progress-text" id="batch-progress-text">0 / 0</span>
+        </div>
+        <div id="batch-image-results" class="bulk-results" hidden>
+          <h3>Extracted Components</h3>
+          <div id="batch-results-grid" class="library-grid"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-secondary" data-close-modal="modal-batch-images">Cancel</button>
+        <button class="btn-accent btn-experimental" id="btn-batch-start">🚀 Analyze All</button>
+        <button class="btn-primary" id="btn-batch-save-all" hidden>💾 Save Selected to Library</button>
       </div>
     </div>
   </div>

@@ -7,10 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.2.0] — 2025-06-13
+## [2.2.1] — 2025-06-13
 
 ### Added
 - **WiringWizard — Image/Schematic Upload**: upload PNG, JPEG, GIF, or WebP images of datasheets, schematics, or pinout tables and AI vision (GPT-4o) extracts pin definitions automatically. 10 MB file size limit.
+- **WiringWizard — Batch Image Import**: select up to 20 schematic images at once and AI vision processes each one sequentially. Progress bar, per-image status cards, checkbox selection for which components to save. Ideal for forum-sourced schematics and scanned datasheets.
 - **WiringWizard — Bulk Library Builder**: paste a documentation URL and click "📦 Bulk Build" to deep-crawl the site and have AI identify up to 20 distinct components with their pinouts in one pass. Select which ones to save from a grid of cards.
 - **WiringWizard — Auto-Update Checker**: on launch, the app checks GitHub for newer releases and shows a non-intrusive banner with a direct download link when an update is available.
 

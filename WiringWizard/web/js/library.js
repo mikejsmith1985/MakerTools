@@ -624,6 +624,244 @@ async function parseImageFile() {
   parseButton.textContent = "📷 Parse Image";
 }
 
+// ── Batch Image Import ─────────────────────────────────────────────────
+
+/** Maximum images in one batch run. */
+const BATCH_IMAGE_MAX_FILES = 20;
+
+/** Maximum file size per image (10 MB). */
+const BATCH_IMAGE_MAX_SIZE_BYTES = 10 * 1024 * 1024;
+
+/** State for the batch import — holds parsed components indexed by file. */
+let batchImageResults = [];
+
+/**
+ * Read a File as a base64 string (without the data-URL prefix).
+ * Returns a Promise that resolves to the raw base64 string.
+ */
+function readFileAsBase64(file) {
+  return new Promise((resolveRead, rejectRead) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result;
+      resolveRead(dataUrl.split(",")[1]);
+    };
+    reader.onerror = () => rejectRead(new Error(`Failed to read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Derive a human-readable component name from a filename.
+ * Strips extension, replaces dashes/underscores with spaces, and title-cases.
+ */
+function deriveComponentNameFromFilename(filename) {
+  const baseName = filename.replace(/\.[^/.]+$/, "");
+  const spacedName = baseName.replace(/[-_]+/g, " ");
+  return spacedName
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+}
+
+/**
+ * Process all selected images sequentially through GPT-4o vision.
+ * Updates progress bar and result cards as each file completes.
+ */
+async function batchAnalyzeImages() {
+  const fileInput = document.getElementById("batch-image-files");
+  const startBtn = document.getElementById("btn-batch-start");
+  const saveBtn = document.getElementById("btn-batch-save-all");
+  const statusDiv = document.getElementById("batch-image-status");
+  const progressBar = document.getElementById("batch-image-progress");
+  const progressFill = document.getElementById("batch-progress-fill");
+  const progressText = document.getElementById("batch-progress-text");
+  const resultsDiv = document.getElementById("batch-image-results");
+  const resultsGrid = document.getElementById("batch-results-grid");
+
+  if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    statusDiv.textContent = "Select at least one image file.";
+    statusDiv.classList.add("bulk-error");
+    statusDiv.removeAttribute("hidden");
+    return;
+  }
+
+  const allowedTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+  const validFiles = Array.from(fileInput.files)
+    .filter((file) => allowedTypes.includes(file.type))
+    .slice(0, BATCH_IMAGE_MAX_FILES);
+
+  if (validFiles.length === 0) {
+    statusDiv.textContent = "No supported image files selected. Use PNG, JPG, GIF, or WebP.";
+    statusDiv.classList.add("bulk-error");
+    statusDiv.removeAttribute("hidden");
+    return;
+  }
+
+  // Check for oversized files
+  const oversizedFiles = validFiles.filter((file) => file.size > BATCH_IMAGE_MAX_SIZE_BYTES);
+  if (oversizedFiles.length > 0) {
+    const oversizedNames = oversizedFiles.map((file) => file.name).join(", ");
+    statusDiv.textContent = `These files exceed 10 MB: ${oversizedNames}. Remove or compress them.`;
+    statusDiv.classList.add("bulk-error");
+    statusDiv.removeAttribute("hidden");
+    return;
+  }
+
+  // Reset UI state
+  batchImageResults = [];
+  startBtn.disabled = true;
+  startBtn.innerHTML = '<span class="spinner-inline"></span> Analyzing...';
+  saveBtn.setAttribute("hidden", "");
+  statusDiv.classList.remove("bulk-error");
+  statusDiv.textContent = `Processing ${validFiles.length} image(s)...`;
+  statusDiv.removeAttribute("hidden");
+  progressBar.removeAttribute("hidden");
+  progressFill.style.width = "0%";
+  progressText.textContent = `0 / ${validFiles.length}`;
+  resultsGrid.innerHTML = "";
+  resultsDiv.removeAttribute("hidden");
+
+  let successCount = 0;
+
+  for (let fileIndex = 0; fileIndex < validFiles.length; fileIndex++) {
+    const currentFile = validFiles[fileIndex];
+    const componentName = deriveComponentNameFromFilename(currentFile.name);
+
+    // Add a pending card in the results grid
+    const cardId = `batch-card-${fileIndex}`;
+    resultsGrid.insertAdjacentHTML("beforeend", `
+      <div class="bulk-component-card" id="${cardId}">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <strong>${componentName}</strong>
+          <span class="batch-card-status pending">⏳ Analyzing...</span>
+        </div>
+        <div class="batch-card-filename">${currentFile.name} (${(currentFile.size / 1024).toFixed(0)} KB)</div>
+      </div>
+    `);
+
+    try {
+      const imageBase64 = await readFileAsBase64(currentFile);
+      console.log(`[library] batchAnalyze: processing ${fileIndex + 1}/${validFiles.length} — ${currentFile.name}`);
+
+      const result = await eel.ai_parse_image(componentName, imageBase64, currentFile.type)();
+
+      const cardElement = document.getElementById(cardId);
+      if (result.error) {
+        // Mark this card as failed
+        batchImageResults.push({ file: currentFile.name, componentName, parsed: null, error: result.error });
+        if (cardElement) {
+          cardElement.querySelector(".batch-card-status").className = "batch-card-status failed";
+          cardElement.querySelector(".batch-card-status").textContent = "❌ Failed";
+          cardElement.insertAdjacentHTML("beforeend",
+            `<div class="component-pin-count" style="color:var(--color-danger)">${result.error}</div>`);
+        }
+      } else {
+        const parsed = result.parsed || {};
+        const pinCount = parsed.pins ? parsed.pins.length : 0;
+        batchImageResults.push({ file: currentFile.name, componentName, parsed, error: null });
+        successCount++;
+        if (cardElement) {
+          cardElement.querySelector(".batch-card-status").className = "batch-card-status success";
+          cardElement.querySelector(".batch-card-status").textContent = `✅ ${pinCount} pin(s)`;
+          cardElement.insertAdjacentHTML("beforeend", `
+            <div class="component-pin-count">${parsed.component_type || "unknown"} · ${pinCount} pin(s)</div>
+            <label style="font-size:0.82rem;margin-top:4px;display:flex;align-items:center;gap:4px">
+              <input type="checkbox" class="batch-save-check" data-index="${fileIndex}" checked />
+              Save to library
+            </label>
+          `);
+        }
+      }
+    } catch (fileError) {
+      console.error(`[library] batchAnalyze error for ${currentFile.name}:`, fileError);
+      batchImageResults.push({ file: currentFile.name, componentName, parsed: null, error: String(fileError) });
+      const cardElement = document.getElementById(cardId);
+      if (cardElement) {
+        cardElement.querySelector(".batch-card-status").className = "batch-card-status failed";
+        cardElement.querySelector(".batch-card-status").textContent = "❌ Error";
+      }
+    }
+
+    // Update progress
+    const completedCount = fileIndex + 1;
+    const progressPercent = Math.round((completedCount / validFiles.length) * 100);
+    progressFill.style.width = `${progressPercent}%`;
+    progressText.textContent = `${completedCount} / ${validFiles.length}`;
+    statusDiv.textContent = `Processed ${completedCount} of ${validFiles.length} images (${successCount} succeeded)...`;
+  }
+
+  // Final status
+  statusDiv.textContent = `Done — ${successCount} of ${validFiles.length} images parsed successfully.`;
+  if (successCount === 0) {
+    statusDiv.classList.add("bulk-error");
+  }
+  startBtn.disabled = false;
+  startBtn.textContent = "🚀 Analyze All";
+  if (successCount > 0) {
+    saveBtn.removeAttribute("hidden");
+  }
+}
+
+/**
+ * Save all checked batch results to the component library.
+ * Iterates through batchImageResults and saves each one with parsed pin data.
+ */
+async function batchSaveSelectedToLibrary() {
+  const saveBtn = document.getElementById("btn-batch-save-all");
+  const statusDiv = document.getElementById("batch-image-status");
+
+  // Gather checked indices
+  const checkedBoxes = document.querySelectorAll(".batch-save-check:checked");
+  const selectedIndices = Array.from(checkedBoxes).map((checkbox) => parseInt(checkbox.dataset.index, 10));
+
+  if (selectedIndices.length === 0) {
+    statusDiv.textContent = "No components selected. Check the boxes next to the ones you want to save.";
+    statusDiv.classList.add("bulk-error");
+    return;
+  }
+
+  saveBtn.disabled = true;
+  saveBtn.innerHTML = '<span class="spinner-inline"></span> Saving...';
+  let savedCount = 0;
+
+  for (const resultIndex of selectedIndices) {
+    const entry = batchImageResults[resultIndex];
+    if (!entry || !entry.parsed) continue;
+
+    const componentPayload = {
+      name: entry.parsed.name || entry.componentName,
+      component_type: entry.parsed.component_type || "other",
+      manufacturer: entry.parsed.manufacturer || "",
+      part_number: entry.parsed.part_number || "",
+      voltage_nominal: entry.parsed.voltage_nominal || null,
+      current_draw_amps: entry.parsed.current_draw_amps || null,
+      pins: entry.parsed.pins || [],
+      notes: entry.parsed.notes || `Extracted from image: ${entry.file}`,
+    };
+
+    try {
+      const saveResult = await eel.add_library_component(JSON.stringify(componentPayload))();
+      if (saveResult.error) {
+        console.error(`[library] batchSave: failed for ${entry.componentName}:`, saveResult.error);
+      } else {
+        savedCount++;
+      }
+    } catch (saveError) {
+      console.error(`[library] batchSave error for ${entry.componentName}:`, saveError);
+    }
+  }
+
+  statusDiv.textContent = `Saved ${savedCount} of ${selectedIndices.length} components to the library.`;
+  statusDiv.classList.remove("bulk-error");
+  saveBtn.disabled = false;
+  saveBtn.textContent = "💾 Save Selected to Library";
+
+  // Refresh the main library grid behind the modal
+  await loadLibrary();
+  setStatus(`Batch import complete — ${savedCount} component(s) added to library.`);
+}
+
 // ── Bulk Library Builder ────────────────────────────────────────────────
 
 /** State for the bulk builder — holds discovered components until user saves. */
@@ -899,6 +1137,13 @@ function initLibraryUI() {
   });
   document.getElementById("btn-bulk-crawl")?.addEventListener("click", bulkCrawlAndIdentify);
   document.getElementById("btn-bulk-save-all")?.addEventListener("click", bulkSaveAll);
+
+  // Batch image import
+  document.getElementById("btn-batch-images")?.addEventListener("click", () => {
+    showModal("modal-batch-images");
+  });
+  document.getElementById("btn-batch-start")?.addEventListener("click", batchAnalyzeImages);
+  document.getElementById("btn-batch-save-all")?.addEventListener("click", batchSaveSelectedToLibrary);
 
   // Update banner dismiss
   document.getElementById("update-dismiss")?.addEventListener("click", () => {
